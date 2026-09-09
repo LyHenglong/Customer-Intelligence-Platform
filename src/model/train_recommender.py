@@ -76,11 +76,19 @@ def load_customer_360() -> pd.DataFrame:
     cols = ", ".join([ID_COL] + PROFILE_NUMERIC + PROFILE_CATEGORICAL + SERVICE_COLUMNS)
     conn = get_pg_conn()
     try:
-        df = pd.read_sql(f"SELECT {cols} FROM marts.customer_360", conn)
+        # Chunked read for the same reason as train_churn.load_customer_360:
+        # a single read_sql spikes memory well above the final DataFrame
+        # while pandas holds the full raw row-tuple form.
+        frames = []
+        for chunk in pd.read_sql(f"SELECT {cols} FROM marts.customer_360", conn, chunksize=25_000):
+            for c in SERVICE_COLUMNS:
+                chunk[c] = chunk[c].astype(int)
+            for c in PROFILE_CATEGORICAL:
+                chunk[c] = chunk[c].astype("category")
+            frames.append(chunk)
+        df = pd.concat(frames, ignore_index=True)
     finally:
         conn.close()
-    for c in SERVICE_COLUMNS:
-        df[c] = df[c].astype(int)
     return df
 
 

@@ -113,7 +113,13 @@ services:
         condition: service_completed_successfully
       postgres:
         condition: service_healthy
-    mem_limit: 900m
+    # The scheduler is where model retraining actually executes (the DAG's
+    # retrain task runs in-process under LocalExecutor), so it needs more
+    # headroom than a scheduler normally would. At 900m the retrain task was
+    # OOM-killed (SIGKILL / return code -9) once customer_360 passed ~460K
+    # rows. Raised alongside the chunked-read and MAX_TRAINING_ROWS fixes in
+    # train_churn.py - the code fixes do the real work; this is margin.
+    mem_limit: 1600m
 
   api:
     build:
@@ -136,6 +142,12 @@ services:
       POSTGRES_DB: ${POSTGRES_DB}
       POSTGRES_USER: ${POSTGRES_USER}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      # `streamlit run <script>` only adds the script's own directory to
+      # sys.path, not the working directory - unlike a plain `python -c`
+      # shell, which is why this didn't surface under `docker exec`
+      # testing. `from src.model.train_churn import ...` needs /app on
+      # the path explicitly.
+      PYTHONPATH: /app
     volumes:
       - ./models_store:/app/models_store
     ports:
@@ -143,10 +155,15 @@ services:
     depends_on:
       - postgres
     profiles: ["serving"]
-    # 400m was set when customer_360 was tiny; at the current 307K+ rows,
-    # loading the full mart into pandas plus a loaded model plus
-    # Streamlit's own baseline footprint got OOM-killed (exit 137) at 400m.
-    mem_limit: 768m
+    # 400m (later 768m) was OOM-killed (exit 137) under a real browser
+    # session - Streamlit's full session/WebSocket state plus rendering 3
+    # plotly charts uses meaningfully more memory than a headless one-shot
+    # script run. app.py was also fixed to stop wastefully full-copying the
+    # 300K+ row dataframe and to stop pulling the unused signup_date column;
+    # this limit is a safety margin on top of those fixes, not a
+    # replacement for them - the host itself is memory-constrained (see
+    # README's RAM rationale), so it isn't raised further than this.
+    mem_limit: 1024m
 
 volumes:
   pgdata:

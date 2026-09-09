@@ -95,6 +95,46 @@ contributors:
 These are all sensible, business-plausible churn drivers — no sign the
 model is picking up on noise.
 
+## 3b. Statistical validation — is the risk-factor list actually real?
+
+A feature-importance ranking can look convincing without being statistically
+sound. `notebooks/eda_and_statistical_analysis.ipynb` tests this directly,
+independent of the LightGBM model, using two completely different methods:
+
+**Significance tests** (chi-square for categorical features, Mann-Whitney U
+for numeric): `contract` and `tenure_bucket` are genuinely associated with
+churn (Cramer's V 0.14 and 0.01 respectively — contract's effect is real
+and moderate, tenure's is real but weak). `gender`, `education`,
+`marital_status`, and `payment_method` are **not statistically
+significant** (all p > 0.05) — there is no supportable "churn persona"
+based on demographics in this data, however tempting that narrative might
+be from a bar chart alone.
+
+**Survival analysis** (Cox Proportional Hazards, modeling time-to-churn
+rather than a binary outcome): confirms the same ranking through an
+entirely different method. `is_month_to_month` carries a hazard ratio of
+**2.86** — a month-to-month customer's instantaneous churn risk is
+essentially triple a longer-contract customer's, at any given tenure.
+`num_complaints` (HR 1.19) and low `customer_satisfaction` (HR 0.90 per
+point, i.e. protective) are the next-strongest drivers. Model concordance:
+0.62 (0.5 = random ranking, 1.0 = perfect).
+
+**A statistical-significance caution, reported rather than hidden:**
+`monthlycharges` reaches p < 0.05 in both the significance tests and the
+Cox model, but its hazard ratio is ≈0.998 per dollar — a customer would
+need to pay $100/month more just to see their hazard drop ~18%. At
+300K+ rows, statistical significance is easy to reach for practically
+negligible effects; both numbers are reported together specifically so
+this doesn't get miscommunicated as "monthly charges matter."
+
+**Unsupervised segmentation** (K-means, no churn label involved in forming
+the clusters): finds 4 usable customer segments differing in income,
+tenure, usage, and bundle size, with churn rates ranging 9–11% across
+clusters. Reported honestly: silhouette scores are modest (~0.14–0.16,
+roughly flat across k=3–8) — the natural structure is a soft continuum,
+not sharp, well-separated groups. k=4 is kept for interpretability, not
+because the clustering is unambiguous.
+
 ## 4. Churn rate by segment
 
 **By contract type:**

@@ -98,7 +98,8 @@ customer_360 (one row per customer: demographics, account, services,
 ├── data/
 │   └── raw/                        # batch_001.csv ... batch_013.csv (gitignored, regenerate via split_batches.py)
 ├── notebooks/
-│   └── model_dev_offline.py        # offline model-comparison experiment (see report/findings.md)
+│   ├── model_dev_offline.py         # offline model-comparison experiment (see report/findings.md)
+│   └── eda_and_statistical_analysis.ipynb  # chi-square/Mann-Whitney tests, survival analysis, clustering, SHAP
 ├── tests/
 │   ├── fixtures/sample_batch.csv
 │   └── test_ingest.py              # 7 unit tests for the DuckDB cleaning/validation/feature logic
@@ -143,6 +144,19 @@ marts/  customer_360   (all of the above, joined on customer_id)
 ```
 
 37 dbt tests (`not_null`, `unique`, `accepted_values`) run across all three layers — all passing as of the last verified run (see "Verified state" below).
+
+## Statistical & analytical depth
+
+Beyond the production pipeline, `notebooks/eda_and_statistical_analysis.ipynb` is a fully executed (not just written) analysis notebook that goes past descriptive segment charts into actual statistical methodology:
+
+- **Significance testing**: chi-square tests (with Cramer's V effect size) for every categorical feature against churn, and Mann-Whitney U tests (with rank-biserial effect size) for every numeric feature. Finding: `contract` and `tenure_bucket` are genuinely associated with churn; `gender`, `education`, `marital_status`, and `payment_method` are **not** statistically significant at all — no demographic "churn persona" is supported by this data.
+- **Statistical vs. practical significance**: at 300K+ rows, several features reach p < 0.05 with a practically negligible effect size (e.g. `monthlycharges`, hazard ratio ≈ 0.998 per dollar) — called out explicitly rather than reported as a bare "significant!" p-value.
+- **Correlation & multicollinearity**: a correlation heatmap plus Variance Inflation Factors across key numeric features.
+- **Survival analysis**: Kaplan-Meier curves (overall and by contract type) and a Cox Proportional Hazards model — modeling *time to churn* directly, which the binary classifier discards. `is_month_to_month` carries a hazard ratio of ~2.86 (holding other factors constant); concordance index 0.62.
+- **Unsupervised customer segmentation**: K-means clustering on profile features (age, income, tenure, charges, satisfaction, usage, service count), with an elbow/silhouette analysis to choose k and a PCA projection to visualize it. Reported honestly: silhouette scores are modest (~0.14–0.16), meaning the natural cluster structure is soft, not sharply separated — stated plainly rather than overclaimed.
+- **SHAP explainability**: TreeExplainer on the production LightGBM model, both as a global summary plot and individual waterfall plots for specific high-risk and low-risk customers. This same SHAP logic is also used live in the **dashboard's At-Risk Customers view** (`compute_shap_risk_factors` in `src/dashboard/app.py`) — replacing an earlier global-feature-importance heuristic with real per-customer explanations (bounded to the displayed rows, not the full 307K+ table, for memory reasons).
+
+See the notebook itself for full output, and `report/findings.md` for the business-facing summary of these findings.
 
 ## How to run
 
@@ -210,7 +224,9 @@ pytest tests/ -v
 | Processing | DuckDB |
 | Transformation | dbt-core 1.8 / dbt-postgres |
 | Storage | PostgreSQL 16 |
-| Modeling | LightGBM, scikit-learn (k-NN, preprocessing), pandas |
+| Modeling | LightGBM, scikit-learn (k-NN, K-means, preprocessing), pandas |
+| Statistical analysis | scipy (chi-square, Mann-Whitney U), statsmodels (VIF), lifelines (Kaplan-Meier, Cox PH) |
+| Explainability | SHAP (TreeExplainer) |
 | Model serving | FastAPI |
 | Dashboard | Streamlit, Plotly |
 | Containerization | Docker, docker-compose |

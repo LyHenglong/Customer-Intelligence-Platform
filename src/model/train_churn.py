@@ -46,6 +46,26 @@ from sklearn.preprocessing import OneHotEncoder
 # optimizing for F1 alone.
 TARGET_RECALL = 0.60
 
+# Cap on rows pulled into memory for training, overridable via env var.
+#
+# This is a deliberate engineering trade-off, not a limitation of the
+# pipeline: ingestion, DuckDB processing, Postgres and dbt all handle the
+# full 1,000,000 rows without difficulty. It is specifically the in-memory
+# scikit-learn/LightGBM training step that is capped, because it runs
+# inside an Airflow worker on an 8GB host (see README's RAM constraint) and
+# was OOM-killed at ~460K rows before this cap existed.
+#
+# The cost of capping is close to zero here: measured AUC across training
+# sizes was 0.677 @ 154K rows, 0.663 @ 231K, 0.683 @ 1M - i.e. flat within
+# noise. Rows beyond ~150K buy no measurable accuracy on this dataset, so
+# bounding memory is free. Raise it (or set it to None) on a larger machine.
+#
+# Sized against the real constraint, which is not the container's mem_limit
+# but Docker Desktop's WSL2 VM: 3.8GB total for every container combined,
+# with swap already saturated. Retraining at 400K rows was still SIGKILLed
+# inside a 1.6GB container because the VM itself had nothing left to give.
+MAX_TRAINING_ROWS = int(os.environ.get("MAX_TRAINING_ROWS", "150000"))
+
 load_dotenv()
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
@@ -87,7 +107,7 @@ def get_pg_conn():
     )
 
 
-def load_customer_360() -> pd.DataFrame:
+def load_customer_360(max_rows: int | None = None) -> pd.DataFrame:
     # Raw psycopg2 connection, not a SQLAlchemy Engine/Connection: pandas'
     # read_sql "is this a SQLAlchemy connectable" detection breaks against
     # some pandas/SQLAlchemy version pairs (hit this with pandas 2.2.3 +
@@ -95,13 +115,48 @@ def load_customer_360() -> pd.DataFrame:
     # to a legacy DBAPI path that expects exactly what a raw psycopg2
     # connection provides.
     cols = ", ".join([ID_COL] + ALL_FEATURES + [TARGET])
+
+    # TABLESAMPLE, applied in Postgres rather than pandas, when a cap is
+    # set: sampling after loading everything would defeat the purpose of
+    # the cap, which exists to bound *peak* memory (see MAX_TRAINING_ROWS).
+    limit_clause = ""
+    if max_rows is not None:
+        conn = get_pg_conn()
+        try:
+            with conn.cursor() as cur:
+                cur.execute("SELECT COUNT(*) FROM marts.customer_360")
+                total = cur.fetchone()[0]
+        finally:
+            conn.close()
+        if total > max_rows:
+            pct = min(100.0, 100.0 * max_rows / total * 1.05)  # slight over-draw, trimmed below
+            limit_clause = f" TABLESAMPLE BERNOULLI ({pct:.4f}) REPEATABLE (42)"
+            log.info("customer_360 has %d rows; sampling ~%d for training (see MAX_TRAINING_ROWS)", total, max_rows)
+
     conn = get_pg_conn()
     try:
-        df = pd.read_sql(f"SELECT {cols} FROM marts.customer_360", conn)
+        # Chunked read, not one big read_sql: psycopg2/pandas materialize the
+        # entire result as raw Python row-tuples before building columnar
+        # arrays, which spikes memory far above the final DataFrame's size.
+        # This exact pattern OOM-killed the Airflow retrain task (SIGKILL,
+        # return code -9) at ~460K rows inside a 900MB container.
+        frames = []
+        for chunk in pd.read_sql(
+            f"SELECT {cols} FROM marts.customer_360{limit_clause}", conn, chunksize=25_000
+        ):
+            for c in BOOLEAN_FEATURES:
+                chunk[c] = chunk[c].astype("float")  # bool -> 0.0/1.0, NaN-safe
+            # category dtype for the low-cardinality string columns: as
+            # object dtype these cost ~65MB each at 1M rows.
+            for c in CATEGORICAL_FEATURES:
+                chunk[c] = chunk[c].astype("category")
+            frames.append(chunk)
+        df = pd.concat(frames, ignore_index=True)
     finally:
         conn.close()
-    for c in BOOLEAN_FEATURES:
-        df[c] = df[c].astype("float")  # bool -> 0.0/1.0, NaN-safe
+
+    if max_rows is not None and len(df) > max_rows:
+        df = df.sample(n=max_rows, random_state=42).reset_index(drop=True)
     return df
 
 
@@ -150,7 +205,7 @@ def choose_threshold(y_test, y_proba, target_recall: float = TARGET_RECALL) -> t
 def train_and_save(df: pd.DataFrame | None = None) -> dict:
     if df is None:
         log.info("Loading customer_360 from warehouse...")
-        df = load_customer_360()
+        df = load_customer_360(max_rows=MAX_TRAINING_ROWS)
     else:
         df = df.copy()
         for c in BOOLEAN_FEATURES:
