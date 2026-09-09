@@ -1,0 +1,20 @@
+FROM python:3.11-slim
+
+WORKDIR /app
+
+# libgomp1: LightGBM's native library dlopen()s libgomp.so.1 (GNU OpenMP)
+# at import time; python:3.11-slim doesn't include it by default.
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends libgomp1 \
+    && apt-get clean \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+COPY src/__init__.py /app/src/__init__.py
+COPY src/model /app/src/model
+COPY models_store /app/models_store
+
+EXPOSE 8000
+CMD ["uvicorn", "src.model.api:app", "--host", "0.0.0.0", "--port", "8000"]

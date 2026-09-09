@@ -1,0 +1,152 @@
+x-airflow-common: &airflow-common
+  # Explicit shared image name: without this, compose tags each service's
+  # build separately (customerintelligence-airflow-init,
+  # -airflow-webserver, -airflow-scheduler) even though they share this
+  # exact same Dockerfile/context - rebuilding one then leaves the other
+  # two silently on stale images. One shared tag means one build covers
+  # all three.
+  image: customerintelligence-airflow:latest
+  build:
+    context: .
+    dockerfile: docker/Dockerfile.airflow
+  environment: &airflow-common-env
+    AIRFLOW__CORE__EXECUTOR: LocalExecutor
+    AIRFLOW__CORE__FERNET_KEY: ${AIRFLOW__CORE__FERNET_KEY}
+    AIRFLOW__WEBSERVER__SECRET_KEY: ${AIRFLOW__WEBSERVER__SECRET_KEY}
+    AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${AIRFLOW_DB}
+    AIRFLOW__CORE__LOAD_EXAMPLES: "false"
+    AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION: "true"
+    AIRFLOW__LOGGING__BASE_LOG_FOLDER: /opt/airflow/logs
+    # App-level env vars our DAG tasks / scripts read (same names dbt and
+    # local scripts use, so behavior is identical in and out of Docker)
+    POSTGRES_HOST: postgres
+    POSTGRES_PORT: "5432"
+    POSTGRES_DB: ${POSTGRES_DB}
+    POSTGRES_USER: ${POSTGRES_USER}
+    POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    DBT_PROFILES_DIR: /opt/airflow/dbt
+    RETRAIN_EVERY_N_BATCHES: ${RETRAIN_EVERY_N_BATCHES}
+    # so `from src.ingest.batch_loader import ...` resolves inside DAG
+    # task code - /opt/airflow isn't on sys.path by default.
+    PYTHONPATH: /opt/airflow
+  volumes:
+    - ./dags:/opt/airflow/dags
+    - ./src:/opt/airflow/src
+    - ./dbt:/opt/airflow/dbt
+    - ./data:/opt/airflow/data
+    - ./db:/opt/airflow/db
+    - ./models_store:/opt/airflow/models_store
+    - ./logs:/opt/airflow/logs
+  user: "${AIRFLOW_UID:-50000}:0"
+  depends_on:
+    postgres:
+      condition: service_healthy
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    shm_size: 256mb
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+      AIRFLOW_DB: ${AIRFLOW_DB}
+    ports:
+      # Host port 5433, not 5432: this machine already runs a native
+      # Windows PostgreSQL service on 5432, which silently intercepts
+      # 127.0.0.1:5432 connections meant for this container (dual-stack
+      # binding conflict). Internal container-to-container traffic
+      # (Airflow, dashboard) still uses port 5432 on the "postgres" service
+      # name and is unaffected by this remap.
+      - "5433:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./docker/init-multi-db.sh:/docker-entrypoint-initdb.d/init-multi-db.sh
+      - ./db/schema.sql:/docker-entrypoint-initdb.d/zz-schema.sql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    mem_limit: 512m
+
+  airflow-init:
+    <<: *airflow-common
+    entrypoint: /bin/bash
+    command:
+      - -c
+      - |
+        airflow db migrate
+        airflow users create \
+          --username "${AIRFLOW_ADMIN_USER}" \
+          --password "${AIRFLOW_ADMIN_PASSWORD}" \
+          --firstname "${AIRFLOW_ADMIN_FIRSTNAME}" \
+          --lastname "${AIRFLOW_ADMIN_LASTNAME}" \
+          --role Admin \
+          --email "${AIRFLOW_ADMIN_EMAIL}" || true
+
+  airflow-webserver:
+    <<: *airflow-common
+    command: webserver
+    ports:
+      # Host port 8081, not 8080: another unrelated project
+      # ("careerintelligence") already has an Airflow webserver bound to
+      # 8080 on this machine. Internal container port stays 8080.
+      - "8081:8080"
+    depends_on:
+      airflow-init:
+        condition: service_completed_successfully
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:8080/health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+    mem_limit: 1200m
+
+  airflow-scheduler:
+    <<: *airflow-common
+    command: scheduler
+    depends_on:
+      airflow-init:
+        condition: service_completed_successfully
+      postgres:
+        condition: service_healthy
+    mem_limit: 900m
+
+  api:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.api
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./models_store:/app/models_store
+    profiles: ["serving"]
+    mem_limit: 400m
+
+  dashboard:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.dashboard
+    environment:
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: "5432"
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    volumes:
+      - ./models_store:/app/models_store
+    ports:
+      - "8501:8501"
+    depends_on:
+      - postgres
+    profiles: ["serving"]
+    # 400m was set when customer_360 was tiny; at the current 307K+ rows,
+    # loading the full mart into pandas plus a loaded model plus
+    # Streamlit's own baseline footprint got OOM-killed (exit 137) at 400m.
+    mem_limit: 768m
+
+volumes:
+  pgdata:

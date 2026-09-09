@@ -1,0 +1,32 @@
+version: 2
+
+models:
+  - name: customer_360
+    description: >
+      One row per customer: demographics, account/contract info, service
+      subscriptions, usage/engagement signals, value segmentation, and the
+      churn label. The single source of truth for ML training and the
+      Streamlit dashboard.
+    columns:
+      - name: customer_id
+        description: Primary key.
+        data_tests: [not_null, unique]
+      - name: churn
+        description: Historical churn label (0 = retained, 1 = churned) - the ML training target.
+        data_tests:
+          - not_null
+          - accepted_values:
+              values: [0, 1]
+      - name: contract
+        data_tests:
+          - not_null
+          - accepted_values:
+              values: ["month_to_month", "one_year", "two_year"]
+      - name: gender
+        data_tests:
+          - accepted_values:
+              values: ["Male", "Female", "Other"]
+      - name: tenure_bucket
+        data_tests:
+          - accepted_values:
+              values: ["new_0_6mo", "established_6_24mo", "loyal_24mo_plus"]

@@ -1,0 +1,24 @@
+version: 2
+
+models:
+  - name: int_customer_service_summary
+    description: Per-customer service subscription flags joined with contract/pricing info.
+    columns:
+      - name: customer_id
+        data_tests: [not_null, unique]
+
+  - name: int_customer_usage_summary
+    description: Per-customer usage/support signals with tenure-normalized complaint rate and disengagement flag.
+    columns:
+      - name: customer_id
+        data_tests: [not_null, unique]
+
+  - name: int_customer_value_segment
+    description: Per-customer value segmentation (income-to-spend ratio, tenure bucket).
+    columns:
+      - name: customer_id
+        data_tests: [not_null, unique]
+      - name: tenure_bucket
+        data_tests:
+          - accepted_values:
+              values: ["new_0_6mo", "established_6_24mo", "loyal_24mo_plus"]

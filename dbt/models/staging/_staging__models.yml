@@ -1,0 +1,60 @@
+version: 2
+
+models:
+  - name: stg_customers__demographics
+    description: One row per customer - demographic attributes.
+    columns:
+      - name: customer_id
+        data_tests: [not_null, unique]
+      - name: gender
+        data_tests:
+          - accepted_values:
+              values: ["Male", "Female", "Other"]
+      - name: education
+        data_tests:
+          - accepted_values:
+              values: ["high_school", "college", "bachelor", "master", "phd"]
+      - name: marital_status
+        data_tests:
+          - accepted_values:
+              values: ["single", "married", "divorced", "widowed"]
+
+  - name: stg_customers__account
+    description: One row per customer - contract and billing attributes.
+    columns:
+      - name: customer_id
+        data_tests: [not_null, unique]
+      - name: contract
+        data_tests:
+          - accepted_values:
+              values: ["month_to_month", "one_year", "two_year"]
+      - name: payment_method
+        data_tests:
+          - accepted_values:
+              values: ["electronic_check", "mailed_check", "bank_transfer", "credit_card"]
+      - name: tenure
+        data_tests:
+          - not_null
+
+  - name: stg_customers__services
+    description: One row per customer - service subscription flags.
+    columns:
+      - name: customer_id
+        data_tests: [not_null, unique]
+
+  - name: stg_customers__usage
+    description: One row per customer - usage, satisfaction, and support-interaction signals.
+    columns:
+      - name: customer_id
+        data_tests: [not_null, unique]
+
+  - name: stg_customers__churn
+    description: One row per customer - the churn label used as the ML training target.
+    columns:
+      - name: customer_id
+        data_tests: [not_null, unique]
+      - name: churn
+        data_tests:
+          - not_null
+          - accepted_values:
+              values: [0, 1]

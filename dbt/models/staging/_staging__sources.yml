@@ -1,0 +1,25 @@
+version: 2
+
+sources:
+  - name: warehouse
+    schema: public
+    tables:
+      - name: customers_cleaned
+        description: >
+          Lightly-cleaned, type-validated, feature-engineered customer rows
+          written by src/ingest/batch_loader.py (DuckDB) from each simulated
+          batch file. One row per customer, append-only across batches.
+        columns:
+          - name: customer_id
+            description: Primary key, unique across the whole dataset (not just per batch).
+            data_tests:
+              - not_null
+              - unique
+          - name: churn
+            description: Historical churn label (0 = retained, 1 = churned).
+            data_tests:
+              - not_null
+              - accepted_values:
+                  values: [0, 1]
+      - name: raw_customers
+        description: Unmodified (only type-cast) pass-through of the source CSV, kept for audit/reprocessing.
