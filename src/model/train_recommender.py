@@ -61,6 +61,26 @@ SERVICE_COLUMNS = [
 ID_COL = "customer_id"
 N_NEIGHBORS = 20
 
+# Size of the k-NN reference set. Unlike the churn model's cap, this one is
+# not only about training memory - it bounds the *artifact*, which is
+# loaded into memory by both the API (400MB limit) and the dashboard.
+#
+# The profile matrix is one float32 row per reference customer, and the
+# fitted NearestNeighbors index holds its own copy, so cost scales linearly
+# with this number. Measured: 150,000 profiles produce a 9.9MB artifact
+# that the API loads at 206MB resident (of a 400MB limit). Extrapolating,
+# all 1,000,000 would be roughly 66MB on disk and would push the API's
+# resident set past its limit - and would be rebuilt from scratch on every
+# retrain.
+#
+# Capping costs little here because this is a *reference set*, not a
+# registry: recommendations come from the 20 nearest neighbours, and a
+# 150K-profile sample of a 1M-customer population already provides dense
+# coverage of the profile space. Customers outside the set are served by
+# projecting their profile into it (recommend_for_profile), so coverage is
+# 100% regardless of this value - see the /recommend endpoint.
+MAX_REFERENCE_ROWS = int(os.environ.get("MAX_REFERENCE_ROWS", "150000"))
+
 
 def get_pg_conn():
     return psycopg2.connect(
@@ -72,7 +92,7 @@ def get_pg_conn():
     )
 
 
-def load_customer_360() -> pd.DataFrame:
+def load_customer_360(max_rows: int | None = MAX_REFERENCE_ROWS) -> pd.DataFrame:
     # Server-side cursor via stream_query, NOT pd.read_sql(chunksize=...):
     # psycopg2's default client-side cursor buffers the whole result set in
     # libpq first, so read_sql's chunking bounds pandas' peak but not the
@@ -87,11 +107,36 @@ def load_customer_360() -> pd.DataFrame:
             batch[c] = batch[c].astype("category")
         return batch
 
-    return stream_query(
-        f"SELECT {', '.join(columns)} FROM marts.customer_360",
+    # TABLESAMPLE in Postgres rather than trimming in pandas: sampling after
+    # loading all 1M rows would defeat the point of the cap, which is to
+    # bound peak memory during the retrain (see MAX_REFERENCE_ROWS).
+    # REPEATABLE makes the reference set stable across retrains, so a
+    # customer's recommendations don't churn just because the sample moved.
+    sample_clause = ""
+    if max_rows is not None:
+        conn = get_pg_conn()
+        try:
+            with conn.cursor() as cur:
+                cur.execute("SELECT COUNT(*) FROM marts.customer_360")
+                total = cur.fetchone()[0]
+        finally:
+            conn.close()
+        if total > max_rows:
+            pct = min(100.0, 100.0 * max_rows / total * 1.05)  # slight over-draw, trimmed below
+            sample_clause = f" TABLESAMPLE BERNOULLI ({pct:.4f}) REPEATABLE (42)"
+            log.info(
+                "customer_360 has %d rows; sampling ~%d as the reference set (see MAX_REFERENCE_ROWS)",
+                total, max_rows,
+            )
+
+    df = stream_query(
+        f"SELECT {', '.join(columns)} FROM marts.customer_360{sample_clause}",
         columns=columns,
         transform=_downcast,
     )
+    if max_rows is not None and len(df) > max_rows:
+        df = df.iloc[:max_rows].reset_index(drop=True)
+    return df
 
 
 def build_preprocessor() -> ColumnTransformer:

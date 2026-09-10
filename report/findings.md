@@ -11,8 +11,9 @@
 warehouse. The statistical analyses below were re-run against that full
 dataset. The production churn model itself is trained on a 150,000-row
 stratified sample of it, a deliberate memory trade-off documented in
-`src/model/train_churn.py` (`MAX_TRAINING_ROWS`). See the main
-[README.md](../README.md) for architecture and verified build state.
+`src/model/train_churn.py` (`MAX_TRAINING_ROWS`). Data drift across those batches is monitored
+with PSI (Section 7). See the main [README.md](../README.md) for
+architecture and verified build state.
 
 ## 1. Class balance (churn label)
 
@@ -130,6 +131,15 @@ practically negligible effects; both numbers are reported together
 specifically so this doesn't get miscommunicated as "monthly charges
 matter."
 
+**Per-customer explanations (SHAP)**: `TreeExplainer` on the production
+LightGBM model, as a global summary plot and as individual waterfall plots
+for specific high- and low-risk customers. This matters for a retention
+team in a way global importances do not: it answers "why is *this*
+customer flagged", which is what a retention agent actually needs before
+making a call. The same computation runs live in the dashboard's At-Risk
+Customers view, bounded to the rows on screen rather than the full 1M-row
+table.
+
 **Unsupervised segmentation** (K-means, no churn label involved in forming
 the clusters): finds 4 usable customer segments differing in income,
 tenure, usage, and bundle size, with churn rates ranging 9–11% across
@@ -166,6 +176,14 @@ less, consistent with a "stickiness" story, though this is also
 correlated with contract type and tenure rather than necessarily causal.
 
 ## 5. Recommendation model behavior
+
+The recommender is rebuilt by the pipeline on the same trigger as the
+churn model, over a bounded 150,000-profile **reference set** sampled from
+`customer_360` (`MAX_REFERENCE_ROWS`). The cap bounds the artifact that the
+API and dashboard must load into memory, not just training cost. It does
+not limit who can receive recommendations: a customer outside the reference
+set — about 85% of the 1,000,000, so the normal case — has their profile
+projected into it at request time, giving 100% coverage.
 
 Content-based k-NN over standardized demographic/account/usage profiles
 (age, income, tenure, charges, satisfaction, usage, gender, education,
@@ -234,9 +252,39 @@ works — but the numbers themselves are not probabilities.
 campaign remains profitable in nearly all combinations — so the
 recommendation does not hinge on getting the cost assumptions exactly right.
 
+## 7. Data drift monitoring
+
+Every arriving batch is scored against a fixed baseline batch using the
+**Population Stability Index** across 19 features (14 numeric, 5
+categorical), with the standard interpretation bands: below 0.10 stable,
+0.10-0.25 investigate, 0.25 and above retrain. Results are persisted to
+`public.feature_drift` and shown on the dashboard's Pipeline Status view.
+
+**Result: no drift, and that is the expected answer.** The maximum PSI
+observed across all 12 batch pairs and all 19 features is **0.0006** —
+roughly three orders of magnitude below the "investigate" band.
+
+This is a property of how the data was constructed, not evidence that the
+monitoring works. The 13 batches are sequential slices of a single
+pre-shuffled 1,000,000-row file (verified during ingestion: churn rate
+across 10 sequential slices all landed within 9.7-10.1%), so the batches
+are statistically interchangeable by design. Any real PSI signal here
+would indicate a bug in the batch splitter, not genuine market movement.
+
+Because a negative result cannot demonstrate a detector works, the
+detector's sensitivity is established separately in `tests/test_drift.py`
+(18 tests), which injects shifts and asserts each is caught: mean shifts,
+variance shifts with an unchanged mean, missingness jumps, previously
+unseen categorical levels, and values outside the reference range.
+
+The practical consequence for this project: retraining is wired to fire on
+either a drift signal or a batch-count cadence, and on this dataset it is
+always the **cadence** that fires. On a real data feed the drift trigger
+would be the one carrying the signal.
+
 ## Limitations
 
 See the [README's Limitations section](../README.md#limitations) — synthetic
 data, DuckDB-over-Spark tradeoff, simulated batch arrivals, content-based-only
-recommendations, batch-count-based retraining, and modest churn model
-performance all apply to every finding in this report.
+recommendations, and modest churn model performance all apply to every
+finding in this report.
