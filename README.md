@@ -158,7 +158,8 @@ customer_360 (one row per customer: demographics, account, services,
 ├── requirements-notebooks.txt      # analysis-only extras (see Statistical & analytical depth)
 ├── pytest.ini
 ├── .env.example
-└── .gitignore
+├── .gitignore
+└── LICENSE
 ```
 
 ## The Customer 360 concept
@@ -431,6 +432,10 @@ Everything below was actually run and checked during the build, not just written
 - **Per-customer explanations are real SHAP values, computed only for the displayed subset.** `TreeExplainer` runs against the bounded set of rows actually on screen (at most 500), never the full 1M-row table — an intentional cost/scale trade-off, not a full-population attribution.
 - **Dashboard verification now includes real browser screenshots** (headless Chromium via Playwright against the running container — every image in [The dashboard](#the-dashboard) is a live capture), in addition to Streamlit's `AppTest` runner. Two rendering defects were found and fixed this way that `AppTest` could not surface, because both were layout problems rather than exceptions: a KPI value truncated to `$26,051...`, and the SHAP column clipped mid-phrase.
 - **This machine's network was unusually slow throughout the build** (a 40MB Kaggle download took ~11 minutes; the Airflow Docker image took well over an hour to build, twice, due to the sqlalchemy-pin fix requiring a second build). If you rebuild on a faster connection, expect this to go much quicker.
+
+## License
+
+[MIT](LICENSE) — the code is free to use, modify, and learn from. The dataset it runs on is a third-party synthetic Kaggle dataset (`isandeep06/customer-churn-prediction-dataset-1m`, see [A note on the data](#a-note-on-the-data)) and is not redistributed here; it is not covered by this license.
 
 ## Author
 
