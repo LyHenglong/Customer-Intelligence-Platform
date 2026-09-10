@@ -12,6 +12,7 @@ Run locally:
 from __future__ import annotations
 
 import json
+import logging
 import os
 from datetime import datetime, timezone
 from pathlib import Path
@@ -34,10 +35,30 @@ from src.model.train_churn import ALL_FEATURES as CHURN_FEATURES  # noqa: E402
 from src.model.train_churn import CATEGORICAL_FEATURES as CHURN_CATEGORICAL  # noqa: E402
 from src.model.train_recommender import recommend_for_profile  # noqa: E402
 from src.model.train_recommender import SERVICE_COLUMNS as REC_SERVICE_COLUMNS  # noqa: E402
+from src.model.train_recommender import service_display_name  # noqa: E402
+from src.model.explain_churn import compute_shap_details, format_risk_factors_text  # noqa: E402
+from src.agents.groq_client import AgentCallFailed  # noqa: E402
+from src.agents.explanation_agent import explain_churn as ai_explain_churn  # noqa: E402
+from src.agents.outreach_agent import draft_outreach as ai_draft_outreach  # noqa: E402
+from src.agents.cache import get_or_generate  # noqa: E402
 
 MODELS_DIR = Path(__file__).resolve().parents[2] / "models_store"
 RETRAIN_EVERY_N_BATCHES = int(os.environ.get("RETRAIN_EVERY_N_BATCHES", "3"))
 TOTAL_SIMULATED_BATCHES = 13
+
+# AI Agent Layer (src/agents/): capped well below max_rows' up-to-500
+# customers. Each customer the first time costs a real Groq call (or two,
+# with outreach), and generation is already opt-in via a button rather
+# than automatic - this cap keeps even an enthusiastic click bounded and
+# fast, not a 500-call burst against a free-tier rate limit.
+AI_AGENT_MAX_CUSTOMERS = 15
+GROQ_CONFIGURED = bool(os.environ.get("GROQ_API_KEY"))
+
+
+def log_agent_failure(agent_type: str, customer_id: str, exc: Exception) -> None:
+    logging.getLogger("dashboard.agents").warning(
+        "%s agent failed for %s, falling back to raw data: %s", agent_type, customer_id, exc
+    )
 
 st.set_page_config(page_title="Retention Command Center", layout="wide", initial_sidebar_state="expanded")
 
@@ -436,52 +457,21 @@ def top_risk_factors(row: pd.Series, importances: dict, top_k: int = 3) -> str:
     return " · ".join(parts)
 
 
-@st.cache_resource
-def get_shap_explainer(_pipeline):
-    import shap
-    return shap.TreeExplainer(_pipeline.named_steps["model"])
-
-
-def _shap_feature_name_to_column(name: str) -> str:
-    if name.startswith("num__"):
-        return name[len("num__"):]
-    if name.startswith("cat__"):
-        rest = name[len("cat__"):]
-        return next((c for c in CHURN_CATEGORICAL if rest.startswith(c + "_")), rest)
-    return name
-
-
 def compute_shap_risk_factors(pipeline, customers_df: pd.DataFrame, top_k: int = 3) -> list[str]:
     """Per-customer SHAP explanations for a *bounded* subset of rows (the
     displayed at-risk table, capped at max_rows - never the full 300K+ row
     dataset, which would be far too expensive to compute and hold in
     memory on this machine). Unlike the global feature-importance ranking
     used elsewhere, this shows what actually drove *this specific*
-    customer's prediction, with direction (pushing risk up vs down)."""
-    X = customers_df[CHURN_FEATURES].copy()
-    for c in [f for f in CHURN_FEATURES if customers_df[f].dtype == bool]:
-        X[c] = X[c].astype(float)
+    customer's prediction, with direction (pushing risk up vs down).
 
-    preproc = pipeline.named_steps["preprocess"]
-    X_transformed = preproc.transform(X)
-    X_transformed = X_transformed.toarray() if hasattr(X_transformed, "toarray") else X_transformed
-    feature_names = preproc.get_feature_names_out()
+    Delegates to src/model/explain_churn.py, which the FastAPI
+    /explain-churn endpoint also calls - one SHAP implementation shared
+    by both surfaces, rather than two that could drift apart."""
+    from src.model.explain_churn import compute_shap_details, format_risk_factors_text
 
-    explainer = get_shap_explainer(pipeline)
-    shap_values = explainer.shap_values(X_transformed)
-    sv = shap_values[1] if isinstance(shap_values, list) else shap_values
-
-    results = []
-    for i in range(len(customers_df)):
-        contributions = sv[i]
-        ranked_idx = np.argsort(np.abs(contributions))[::-1][:top_k]
-        parts = []
-        for idx in ranked_idx:
-            col = _shap_feature_name_to_column(feature_names[idx]).replace("_", " ")
-            sign = "▲" if contributions[idx] > 0 else "▼"
-            parts.append(f"{sign} {col}")
-        results.append(" · ".join(parts))
-    return results
+    details_per_row = compute_shap_details(pipeline, customers_df, top_k=top_k)
+    return [format_risk_factors_text(details) for details in details_per_row]
 
 
 def section_header(eyebrow: str, title: str):
@@ -667,17 +657,24 @@ def main():
             with st.spinner("Computing per-customer SHAP explanations..."):
                 # See explain_pipeline note above: TreeExplainer needs the
                 # raw LightGBM pipeline, not the CalibratedClassifierCV
-                # wrapper used for serving.
-                shap_labels = compute_shap_risk_factors(explain_pipeline, display_subset)
+                # wrapper used for serving. Structured details (not just
+                # formatted text) computed once here so the AI Agent Layer
+                # section below can reuse them as grounding input, instead
+                # of a second, redundant SHAP pass.
+                shap_details_per_row = compute_shap_details(explain_pipeline, display_subset, top_k=3)
+            shap_labels = [format_risk_factors_text(d) for d in shap_details_per_row]
         except Exception:
             # Falls back to the global-importance heuristic if SHAP fails
             # for any reason (e.g. a future model type TreeExplainer
             # doesn't support) - degrades gracefully, doesn't break the view.
             shap_labels = [top_risk_factors(row, importances) if importances else "" for _, row in display_subset.iterrows()]
+            shap_details_per_row = [[] for _ in range(len(display_subset))]
 
         display_rows = []
+        recommended_services_raw = []  # parallel to display_rows: raw "has_x" column name or None
         for (_, row), risk_factors in zip(display_subset.iterrows(), shap_labels):
             action = "-"
+            service_raw = None
             if rec_artifact is not None:
                 try:
                     # Profile-based, not id-based: the k-NN index is a
@@ -691,9 +688,11 @@ def main():
                         rec_artifact, row.to_frame().T, own, top_n=1
                     )
                     if recs:
-                        action = f"Offer: {recs[0]['service'].replace('has_', '').replace('_', ' ').title()}"
+                        service_raw = recs[0]["service"]
+                        action = f"Offer: {service_display_name(service_raw)}"
                 except Exception:
                     action = "-"
+            recommended_services_raw.append(service_raw)
             display_rows.append({
                 "customer_id": row["customer_id"],
                 "churn_probability": row["churn_probability"],
@@ -725,6 +724,80 @@ def main():
             file_name=f"at_risk_customers_{datetime.now(timezone.utc).strftime('%Y%m%d')}.csv",
             mime="text/csv",
         )
+
+        # --------------------------------------------------- AI Agent Layer
+        st.markdown("&nbsp;")
+        section_header("AI AGENT LAYER", "Plain-English explanations & drafted outreach")
+        n_ai = min(AI_AGENT_MAX_CUSTOMERS, len(display_subset))
+        st.caption(
+            f"Explains and drafts over the SHAP values and recommendation already computed above - it "
+            f"never changes the churn probability or which service is recommended, only narrates them "
+            f"(see the README's AI Agent Layer section). Capped to the top {n_ai} customers by risk and "
+            f"generated only on request, since each customer costs a real LLM call the first time; results "
+            f"are cached per customer per model version, so re-opening this view or re-running the pipeline "
+            f"without a retrain reuses the cached text instantly rather than re-calling Groq."
+        )
+
+        ai_cache_key = f"ai_layer_{churn_version}"
+        if st.button(f"Generate AI explanations & outreach drafts for the top {n_ai} customers", key="ai_gen_button"):
+            st.session_state[ai_cache_key] = True
+        if not GROQ_CONFIGURED:
+            st.info(
+                "GROQ_API_KEY is not set, so this section would fall back to the raw SHAP/recommendation "
+                "data shown above rather than AI prose. Set it in .env to see AI-generated output "
+                "(see the README's AI Agent Layer section)."
+            )
+        elif st.session_state.get(ai_cache_key):
+            ai_rows = list(zip(
+                display_subset.head(n_ai).itertuples(index=False),
+                shap_details_per_row[:n_ai],
+                recommended_services_raw[:n_ai],
+            ))
+            progress = st.progress(0.0, text="Generating AI explanations & outreach drafts...")
+            for i, (row, shap_details, service_raw) in enumerate(ai_rows):
+                customer_id = row.customer_id
+                churn_probability = float(row.churn_probability)
+                fallback_explanation = format_risk_factors_text(shap_details) if shap_details else "No risk factors available."
+
+                try:
+                    explanation = get_or_generate(
+                        customer_id, "explanation", churn_version,
+                        lambda cp=churn_probability, sd=shap_details: ai_explain_churn(cp, sd),
+                    )
+                    explanation_source = "llm"
+                except AgentCallFailed as exc:
+                    explanation = fallback_explanation
+                    explanation_source = "fallback"
+                    log_agent_failure("explanation", customer_id, exc)
+
+                outreach = None
+                outreach_source = None
+                if service_raw:
+                    service_name = service_display_name(service_raw)
+                    try:
+                        outreach = get_or_generate(
+                            customer_id, "outreach", churn_version,
+                            lambda e=explanation, s=service_name: ai_draft_outreach(e, s),
+                        )
+                        outreach_source = "llm"
+                    except AgentCallFailed as exc:
+                        outreach = f"(AI outreach draft unavailable - recommended offer: {service_name})"
+                        outreach_source = "fallback"
+                        log_agent_failure("outreach", customer_id, exc)
+
+                with st.expander(f"{customer_id} — {churn_probability:.0%} churn risk"):
+                    badge = "🤖 AI-generated" if explanation_source == "llm" else "⚠️ fallback (raw SHAP)"
+                    st.markdown(f"**Why they're at risk** _{badge}_")
+                    st.write(explanation)
+                    if outreach is not None:
+                        badge2 = "🤖 AI-generated" if outreach_source == "llm" else "⚠️ fallback"
+                        st.markdown(f"**Drafted outreach message** _{badge2}_")
+                        st.text(outreach)
+                    else:
+                        st.caption("No service recommendation available for this customer - no outreach drafted.")
+
+                progress.progress((i + 1) / len(ai_rows), text=f"{i + 1}/{len(ai_rows)} customers processed")
+            progress.empty()
 
     # ------------------------------------------------------------ Segments
     elif view == "Segments":
@@ -873,6 +946,31 @@ def main():
                     "psi": st.column_config.NumberColumn("PSI", format="%.5f"),
                     "severity": st.column_config.TextColumn("Status"),
                 },
+            )
+
+        # ------------------------------------------- AI retrain summary
+        st.markdown("&nbsp;")
+        section_header("AI AGENT LAYER", "Latest retrain summary")
+        from src.agents.cache import get_latest_retrain_summary
+
+        latest_summary = get_latest_retrain_summary()
+        if latest_summary is None:
+            st.info(
+                "No retrain has happened yet since this feature was added - written by the DAG's "
+                "`summarize_retrain` task, which only runs on the `retrain_churn_model` branch "
+                "(nothing to summarize when a batch takes the `skip_retrain` path)."
+            )
+        else:
+            st.caption(
+                f"Model {latest_summary['churn_model_version']}"
+                + (f" vs. previous {latest_summary['previous_version']}" if latest_summary['previous_version'] else " (first recorded version)")
+                + f" · {latest_summary['created_at']:%Y-%m-%d %H:%M UTC}"
+            )
+            st.write(latest_summary["summary_text"])
+            st.caption(
+                "Plain-English narrative over the structured metrics already saved by retrain_churn_model "
+                "and the drift results from detect_feature_drift - never a second modeling step, only a "
+                "narration of numbers computed elsewhere (see the README's AI Agent Layer section)."
             )
 
 

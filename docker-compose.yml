@@ -26,6 +26,10 @@ x-airflow-common: &airflow-common
     POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
     DBT_PROFILES_DIR: /opt/airflow/dbt
     RETRAIN_EVERY_N_BATCHES: ${RETRAIN_EVERY_N_BATCHES}
+    # AI Agent Layer (src/agents/): read by the summarize_retrain task.
+    # Optional - see the README's "AI Agent Layer" section for the
+    # fallback behavior when this is unset or Groq is unreachable.
+    GROQ_API_KEY: ${GROQ_API_KEY:-}
     # so `from src.ingest.batch_loader import ...` resolves inside DAG
     # task code - /opt/airflow isn't on sys.path by default.
     PYTHONPATH: /opt/airflow
@@ -37,6 +41,10 @@ x-airflow-common: &airflow-common
     - ./db:/opt/airflow/db
     - ./models_store:/opt/airflow/models_store
     - ./logs:/opt/airflow/logs
+    # summarize_retrain writes report/retrain_summaries/*.md here -
+    # mounted (not baked into the image) so those files land on the host
+    # alongside report/findings.md, visible outside the container.
+    - ./report:/opt/airflow/report
   user: "${AIRFLOW_UID:-50000}:0"
   depends_on:
     postgres:
@@ -134,6 +142,9 @@ services:
       POSTGRES_DB: ${POSTGRES_DB}
       POSTGRES_USER: ${POSTGRES_USER}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      # AI Agent Layer: read by /explain-churn. Optional - see the
+      # README's "AI Agent Layer" section for the fallback behavior.
+      GROQ_API_KEY: ${GROQ_API_KEY:-}
     depends_on:
       - postgres
     ports:
@@ -153,6 +164,10 @@ services:
       POSTGRES_DB: ${POSTGRES_DB}
       POSTGRES_USER: ${POSTGRES_USER}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      # AI Agent Layer: read by the At-Risk Customers view's explanation
+      # and outreach sections. Optional - see the README's "AI Agent
+      # Layer" section for the fallback behavior when unset.
+      GROQ_API_KEY: ${GROQ_API_KEY:-}
       # `streamlit run <script>` only adds the script's own directory to
       # sys.path, not the working directory - unlike a plain `python -c`
       # shell, which is why this didn't surface under `docker exec`

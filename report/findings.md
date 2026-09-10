@@ -369,6 +369,34 @@ either a drift signal or a batch-count cadence, and on this dataset it is
 always the **cadence** that fires. On a real data feed the drift trigger
 would be the one carrying the signal.
 
+## 8. AI Agent Layer - narrating the findings above, not producing new ones
+
+Everything in this document up to here is a number a model, a statistical
+test, or a query produced. `src/agents/` (Groq-backed, OpenAI-compatible
+API) sits on top of that unchanged, turning it into plain English for a
+retention team: SHAP attribution into a 2-3 sentence explanation, an
+explanation plus the recommender's top suggestion into a drafted outreach
+message, and old-vs-new retrain metrics plus drift results into a summary
+paragraph. None of the three agents can change a prediction, a ranking, or
+a metric - they read already-final output and describe it.
+
+Verified against this platform's real data, not illustrative text: a real
+customer (`CUST0000269643`, 32.6% churn probability) produced a real
+explanation grounded in their actual SHAP factors, a real drafted outreach
+message that correctly named the real recommended service ("Internet
+Service"), and a real Airflow-triggered retrain produced a real summary
+correctly identifying an F1/AUC regression (0.2528→0.2411, 0.6693→0.6564)
+while correctly calling the smaller precision/recall changes "essentially
+unchanged" rather than over-reading noise as a trend.
+
+Full detail - the exact prompts, the guardrails (Postgres caching,
+retry/backoff on real rate limits, fallback to raw data on any failure),
+and the genuine friction hit along the way (the originally-chosen Groq
+model IDs had been retired from Groq's catalog entirely; the replacement
+reasoning models needed a token-budget fix after an empty-completion
+failure; a cache read-path bug that would have crashed the first real
+call) - is in the [README's AI Agent Layer section](../README.md#ai-agent-layer).
+
 ## Limitations
 
 See the [README's Limitations section](../README.md#limitations) — synthetic

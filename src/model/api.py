@@ -1,11 +1,14 @@
 """
-FastAPI serving layer for the churn classifier and content-based
-recommender. Loads the latest versioned artifact of each model at startup
-(by filename timestamp - see train_churn.py / train_recommender.py) and
-serves from those in-memory artifacts. Churn predictions and recommender
-index hits need no database at all; /recommend falls back to a single
-warehouse lookup only when a customer isn't in the recommender's bounded
-reference set (see the endpoint for why that is the common case).
+FastAPI serving layer for the churn classifier, content-based recommender,
+and the AI Agent Layer that narrates their output (src/agents/). Loads the
+latest versioned artifact of each model at startup (by filename timestamp
+- see train_churn.py / train_recommender.py) and serves from those
+in-memory artifacts. Churn predictions and recommender index hits need no
+database at all; /recommend falls back to a single warehouse lookup only
+when a customer isn't in the recommender's bounded reference set (see the
+endpoint for why that is the common case), and /explain-churn always
+touches the warehouse (it needs the customer's full feature row) plus
+Postgres-backed LLM output caching (see src/agents/cache.py).
 
 Run locally:
     uvicorn src.model.api:app --reload
@@ -15,6 +18,7 @@ Endpoints:
     GET  /model-info
     POST /predict-churn
     POST /recommend
+    GET  /explain-churn/{customer_id}
 """
 
 from __future__ import annotations
@@ -30,11 +34,16 @@ from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, Field
 
 from src.model.train_churn import ALL_FEATURES as CHURN_FEATURES
+from src.model.train_churn import ID_COL as CHURN_ID_COL
 from src.warehouse import get_pg_conn
 from src.model.train_recommender import recommend_for_customer, recommend_for_profile
 from src.model.train_recommender import PROFILE_NUMERIC as REC_PROFILE_NUMERIC
 from src.model.train_recommender import PROFILE_CATEGORICAL as REC_PROFILE_CATEGORICAL
 from src.model.train_recommender import SERVICE_COLUMNS as REC_SERVICE_COLUMNS
+from src.model.explain_churn import compute_shap_details, format_risk_factors_text
+from src.agents.groq_client import AgentCallFailed
+from src.agents.explanation_agent import explain_churn as ai_explain_churn
+from src.agents.cache import get_or_generate
 
 os.environ.setdefault("LOKY_MAX_CPU_COUNT", str(os.cpu_count() or 4))
 
@@ -235,4 +244,86 @@ def recommend(req: RecommendRequest):
         customer_id=req.customer_id,
         recommendations=recs,
         model_version=_state["recommender_version"],
+    )
+
+
+class ExplainChurnResponse(BaseModel):
+    customer_id: str
+    churn_probability: float
+    risk_factors: list[dict] = Field(
+        ..., description="Raw SHAP attribution: [{feature, shap_value, direction}], always present"
+    )
+    explanation: str = Field(..., description="Plain-English explanation - AI-generated when available")
+    source: str = Field(..., description='"llm" (AI Agent Layer) or "fallback" (raw SHAP text, LLM unavailable)')
+    model_version: str
+
+
+def _fetch_churn_row_from_warehouse(customer_id: str):
+    """Pulls one customer's full churn-feature row from the mart, for the
+    /explain-churn endpoint - the analog of _fetch_profile_from_warehouse
+    above, for the churn model's feature set rather than the recommender's."""
+    conn = get_pg_conn()
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                f"SELECT {', '.join(CHURN_FEATURES)} FROM marts.customer_360 WHERE {CHURN_ID_COL} = %s",
+                (customer_id,),
+            )
+            row = cur.fetchone()
+    finally:
+        conn.close()
+    if row is None:
+        return None
+    return pd.DataFrame([row], columns=CHURN_FEATURES)
+
+
+@app.get("/explain-churn/{customer_id}", response_model=ExplainChurnResponse)
+def explain_churn_endpoint(customer_id: str):
+    """AI Agent Layer: a plain-English explanation of why this customer is
+    flagged as at-risk, grounded in the churn model's own SHAP attribution
+    (see src/model/explain_churn.py). This is a presentation layer over an
+    already-final prediction - it never changes the churn probability or
+    which features the model used, only narrates them.
+
+    Falls back to the raw SHAP factor list (as compact text) if the LLM
+    call fails for any reason - the endpoint always returns 200 with real
+    data, it just degrades from AI prose to the underlying numbers rather
+    than ever raising a 5xx for an LLM outage."""
+    if _state["churn"] is None:
+        raise HTTPException(status_code=503, detail="Churn model not loaded")
+
+    X = _fetch_churn_row_from_warehouse(customer_id)
+    if X is None:
+        raise HTTPException(status_code=404, detail=f"customer_id {customer_id!r} not found")
+
+    artifact = _state["churn"]
+    pipeline = artifact["pipeline"]
+    explain_pipeline = artifact.get("base_pipeline", pipeline)
+
+    X_for_predict = X.copy()
+    for c in [f for f in CHURN_FEATURES if X_for_predict[f].dtype == bool]:
+        X_for_predict[c] = X_for_predict[c].astype(float)
+    churn_probability = float(pipeline.predict_proba(X_for_predict)[0, 1])
+
+    shap_details = compute_shap_details(explain_pipeline, X, top_k=5)[0]
+    fallback_text = format_risk_factors_text(shap_details)
+
+    try:
+        explanation = get_or_generate(
+            customer_id, "explanation", _state["churn_version"],
+            lambda: ai_explain_churn(churn_probability, shap_details),
+        )
+        source = "llm"
+    except AgentCallFailed as exc:
+        log.warning("explanation agent unavailable for %s, falling back to raw SHAP: %s", customer_id, exc)
+        explanation = fallback_text
+        source = "fallback"
+
+    return ExplainChurnResponse(
+        customer_id=customer_id,
+        churn_probability=round(churn_probability, 4),
+        risk_factors=shap_details,
+        explanation=explanation,
+        source=source,
+        model_version=_state["churn_version"],
     )

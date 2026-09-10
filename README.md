@@ -40,7 +40,13 @@ The **Segments** view doubles as a visual confirmation of a negative result: chu
 
 ![Batch ingestion and retraining status](docs/images/dashboard-pipeline-status.png)
 
-**Pipeline Status** exposes the orchestration layer to the same audience: batches ingested (13/13), batches remaining until the next conditional retrain, and the number of model versions trained to date (7).
+**Pipeline Status** exposes the orchestration layer to the same audience: batches ingested (13/13), batches remaining until the next conditional retrain, the number of model versions trained to date, and an AI-generated plain-English summary of the most recent real retrain, written by the DAG's `summarize_retrain` task (see [AI Agent Layer](#ai-agent-layer)):
+
+![AI-generated plain-English retrain summary](docs/images/dashboard-retrain-summary.png)
+
+The At-Risk Customers view also carries an opt-in AI Agent Layer section: per-customer plain-English risk explanations and drafted retention messages, generated on request (capped to the top 15 by risk, cached per customer per model version) rather than automatically for every row:
+
+![AI-generated churn explanations and drafted outreach messages](docs/images/dashboard-ai-agent-layer.png)
 
 ## Motivation
 
@@ -109,9 +115,17 @@ customer_360 (one row per customer: demographics, account, services,
         └──────────────┬───────────────┘
                         ▼
               FastAPI (src/model/api.py)
-        POST /predict-churn   POST /recommend
+   POST /predict-churn  POST /recommend  GET /explain-churn/{id}
      (loads latest artifact of each at startup,
-      no live DB dependency at request time)
+      no live DB dependency at request time,
+      except /explain-churn and /recommend's fallback path)
+                        │
+                        ▼
+         AI Agent Layer (src/agents/) — presentation only
+   explanation_agent / outreach_agent / retrain_summary_agent
+    narrate SHAP values, recommendations, and retrain metrics
+    in plain English via Groq — never change a prediction or
+     a recommendation, and degrade to raw data on any failure
 ```
 
 ## Repository Structure
@@ -129,10 +143,17 @@ customer_360 (one row per customer: demographics, account, services,
 │   │   ├── train_churn.py         # trains, calibrates, and evaluates the churn classifier, saves versioned artifact
 │   │   ├── train_recommender.py   # trains the content-based recommender, saves versioned artifact
 │   │   ├── evaluate_recommender.py # leave-one-out offline evaluation vs. popularity/random baselines
+│   │   ├── explain_churn.py       # shared per-customer SHAP logic (dashboard + /explain-churn both call this)
 │   │   ├── threshold_analysis.py  # expected-value threshold selection (cost/benefit model)
-│   │   └── api.py                 # FastAPI app: /predict-churn and /recommend
+│   │   └── api.py                 # FastAPI app: /predict-churn, /recommend, /explain-churn
 │   ├── monitoring/
 │   │   └── drift.py               # PSI drift detection between batches (see Drift monitoring)
+│   ├── agents/                    # AI Agent Layer - presentation only, see AI Agent Layer
+│   │   ├── groq_client.py         # shared Groq wrapper: retry/backoff, model tiers, token logging
+│   │   ├── explanation_agent.py   # SHAP values -> plain-English churn explanation
+│   │   ├── outreach_agent.py      # explanation + recommendation -> drafted retention message
+│   │   ├── retrain_summary_agent.py # old vs. new metrics + drift -> plain-English retrain summary
+│   │   └── cache.py               # Postgres-backed cache, keyed by customer + agent + model version
 │   └── dashboard/
 │       └── app.py                 # Streamlit dashboard, reads customer_360 directly
 ├── dbt/
@@ -144,7 +165,7 @@ customer_360 (one row per customer: demographics, account, services,
 │   ├── dbt_project.yml
 │   └── profiles.yml
 ├── db/
-│   └── schema.sql                  # raw_customers, customers_cleaned, ingestion_log, feature_drift DDL
+│   └── schema.sql                  # raw_customers, customers_cleaned, ingestion_log, feature_drift, llm_explanations, retrain_summaries DDL
 ├── data/
 │   └── raw/                        # batch_001.csv ... batch_013.csv (gitignored, regenerate via split_batches.py)
 ├── notebooks/
@@ -157,11 +178,13 @@ customer_360 (one row per customer: demographics, account, services,
 │   ├── test_model.py               # 13 tests: expected-value math, threshold selection, recommender invariants
 │   ├── test_drift.py               # 18 tests: PSI correctness, incl. shifts the detector must catch
 │   ├── test_evaluate_recommender.py # 20 tests: ranking metrics, leave-one-out splitting, significance tests
-│   └── test_dashboard.py           # 5 tests: pins the CalibratedClassifierCV/.named_steps regression (see Deviations)
+│   ├── test_dashboard.py           # 5 tests: pins the CalibratedClassifierCV/.named_steps regression (see Deviations)
+│   └── test_agents.py              # 28 tests: AI Agent Layer - prompt grounding, retry/backoff, fallback (Groq mocked)
 ├── docs/
 │   └── images/                     # dashboard screenshots used in this README
 ├── report/
-│   └── findings.md                 # business-facing write-up (synthetic-data caveat up front)
+│   ├── findings.md                 # business-facing write-up (synthetic-data caveat up front)
+│   └── retrain_summaries/          # AI-generated, one .md per real retrain (written by summarize_retrain)
 ├── docker/
 │   ├── Dockerfile.airflow
 │   ├── Dockerfile.api
@@ -300,6 +323,72 @@ python -m src.model.evaluate_recommender
 
 Full detail, including why customers with fewer than 2 candidate services are excluded from evaluation (a guaranteed hit that would inflate every ranker equally), is in `report/findings.md` Section 5a.
 
+## AI Agent Layer
+
+Everything above this section is the platform: a calibrated model, a significance-tested recommender, drift monitoring, all producing numbers. `src/agents/` sits entirely on top of that, unchanged - three small agents (Groq, OpenAI-compatible API) that turn already-final model output into plain English for a human. **They explain and draft; they never predict or recommend.** A churn probability, a SHAP attribution, a recommended service - all of that is decided before an agent ever sees it, and no agent's output can change any of it. If Groq is unreachable, every feature that depends on it falls back to showing that same raw data instead of AI prose - nothing breaks, it just gets less readable.
+
+```
+SHAP values (already computed,           ──────►  explanation_agent
+see explain_churn.py)                             "why is this customer at risk?"
+                                                            │
+Recommender's top suggested service        ──────►  outreach_agent
+(already computed, unchanged)                       "draft a message offering it"
+                                                            │
+Old vs. new model metrics + PSI drift      ──────►  retrain_summary_agent
+(already computed and saved)                        "did this retrain help?"
+```
+
+Every example below is real output from this running platform, not illustrative text - see Verified state and Deviations for how each was produced and what went wrong along the way.
+
+### Churn explanation
+
+`GET /explain-churn/{customer_id}` and the dashboard's At-Risk Customers view both call `explain_churn()` with the customer's real churn probability and top-5 SHAP factors (feature, signed value, direction) - the same numbers already shown in the SHAP column, just narrated.
+
+> **Customer `CUST0000269643`, 32.6% churn probability.** SHAP factors: `contract` (+0.544, increases risk), `num_complaints` (+0.380, increases risk), `num_service_calls` (+0.369, increases risk), `late_payments` (+0.286, increases risk), `age` (+0.265, increases risk).
+>
+> *"The model estimates a 32.6% chance that the customer will churn, driven primarily by the fact that they are on a contract, have logged multiple complaints, and have made several service calls, all of which raise the risk. Additional contributors are late payments and a younger age, which also increase the likelihood of churn."*
+
+One real limitation worth stating plainly: "on a contract" doesn't say *which* contract type. The SHAP feature-name mapping (pre-existing, used identically by the dashboard's SHAP column) collapses a one-hot-encoded categorical back to its base column name (`cat__contract_two_year` → `contract`), which loses the specific value. The agent is faithfully narrating what it was given - the imprecision is upstream of it, not invented by it.
+
+### Retention outreach
+
+The dashboard's At-Risk Customers view feeds the explanation above, plus the recommender's real top-1 suggestion for the same customer, into `draft_outreach()`.
+
+> **Recommended service (from `recommend_for_profile`, unchanged): Internet Service, score 0.948.**
+>
+> *"We hope you're enjoying your experience with us, and we wanted to reach out personally to ensure everything is running smoothly. We understand you've had a few recent concerns, and we're committed to making things right for you. To help improve your overall experience, we'd like to offer you our enhanced Internet Service, which provides faster speeds and greater reliability. Please let us know if you'd like more details or assistance setting it up.*
+>
+> *The Retention Team"*
+
+`mentions_service()` (see `src/agents/outreach_agent.py`) confirms the draft actually names the real recommendation rather than a hallucinated one - true here, and logged as a warning (not silently accepted) on the rare case it isn't, verified with a real example in `tests/test_agents.py`.
+
+### Retrain summary
+
+The DAG's `summarize_retrain` task runs after `retrain_churn_model`, comparing the new artifact's metrics against the previous one plus the batch's drift results, and only on the branch where a retrain actually happened - `skip_retrain` produces no new metrics, so there's nothing to summarize on that path (verified: it shows as `skipped` in Airflow on a batch that didn't retrain).
+
+> **Real DAG run, model `20260910T154013Z` vs. previous `20260910T124230Z`:**
+>
+> *"The new model shows a regression compared to the previous version: the f1 score dropped from 0.2528 to 0.2411 and the ROC‑AUC fell from 0.6693 to 0.6564, both changes exceeding the 0.01 threshold. Precision and recall changed by less than 0.01, so those metrics are essentially unchanged. No significant feature drift was detected in the triggering batch."*
+
+Written to `report/retrain_summaries/retrain_summary_20260910T154013Z.md` and to the `retrain_summaries` Postgres table, and shown on the dashboard's Pipeline Status view. The regression itself is expected noise (see [Verified state](#verified-state) for why: both artifacts trained on the same 150K-row sample with the same random seed, so this reflects sampling variance in the calibration/test split, not a real capability drop) - included here specifically *because* it's the honest case, not the flattering "essentially unchanged" one from an earlier direct test.
+
+### Guardrails
+
+- **Caching**: every explanation/outreach is cached in Postgres, keyed by `(customer_id, agent_type, churn_model_version)` - a retrain invalidates the cache (correctly: the SHAP values it's explaining changed), but a dashboard refresh or re-running the pipeline without a retrain does not. Measured: a cache hit returns in ~0.02s against ~4.5s for a real call.
+- **Retry/backoff on rate limits**: `groq_client.complete()` retries up to 3 times with exponential backoff on `RateLimitError`/timeouts. This is not theoretical - generating AI content for 15 real customers in one dashboard session genuinely hit Groq's free-tier rate limit mid-run (`429 Too Many Requests`, visible in the container logs), and the backoff recovered every one of them without the feature failing.
+- **Graceful fallback everywhere**: every call site (`/explain-churn`, the dashboard's At-Risk Customers and Pipeline Status views, the DAG's `summarize_retrain`) catches `AgentCallFailed` and falls back to the raw underlying data (SHAP text, recommendation, metrics dict) rather than raising a 5xx or crashing a Streamlit script. `GROQ_API_KEY` unset is itself a handled case, not an error - the platform runs completely normally without it, just without the AI prose.
+- **Cost bounded on purpose**: the dashboard generates AI content only on an explicit button click, capped to the top 15 at-risk customers (`AI_AGENT_MAX_CUSTOMERS`) regardless of how many the raw SHAP table shows - a deliberate cap independent of the "max at-risk to display" slider, so an enthusiastic click can't fire an unbounded burst of calls against a free-tier limit.
+
+### Enabling it
+
+Optional - everything else in this project works without it. Get a free key at [console.groq.com/keys](https://console.groq.com/keys), add it to `.env`:
+
+```bash
+GROQ_API_KEY=gsk_...
+```
+
+then restart the `api`/`dashboard` containers (or `airflow-scheduler` for retrain summaries) so the env var is picked up. `tests/test_agents.py` needs no key at all - every Groq call is mocked.
+
 ## How to run
 
 ### 1. Prerequisites
@@ -307,6 +396,7 @@ Full detail, including why customers with fewer than 2 candidate services are ex
 - Docker Desktop
 - A `kaggle.json` API token at `~/.kaggle/kaggle.json` (get one from kaggle.com → Account → Create New API Token) — only needed once, to download the dataset
 - Copy `.env.example` to `.env` and fill in real values (a Postgres password and Airflow admin password at minimum)
+- Optional: a free `GROQ_API_KEY` from [console.groq.com/keys](https://console.groq.com/keys) for the [AI Agent Layer](#ai-agent-layer) — everything else works without it
 
 ### 2. One-time data setup
 
@@ -357,7 +447,7 @@ dbt test
 pytest tests/ -v
 ```
 
-63 tests, all operating on synthetic in-memory fixtures — no database, no Docker, and no trained model artifact required, which is what lets the GitHub Actions workflow run them on a clean checkout.
+91 tests, all operating on synthetic in-memory fixtures — no database, no Docker, no trained model artifact, and (for the AI Agent Layer) no real Groq API key required, which is what lets the GitHub Actions workflow run them on a clean checkout.
 
 | File | Tests | Covers |
 | --- | --- | --- |
@@ -366,6 +456,7 @@ pytest tests/ -v
 | `test_drift.py` | 18 | PSI correctness, and the shifts the detector is required to catch |
 | `test_evaluate_recommender.py` | 20 | ranking metrics, leave-one-out splitting, bootstrap/McNemar significance tests |
 | `test_dashboard.py` | 5 | `column_importances`/SHAP behave correctly on both a raw pipeline and a `CalibratedClassifierCV` wrapper |
+| `test_agents.py` | 28 | AI Agent Layer: prompt grounding in real SHAP/metrics data, retry/backoff on rate limits, graceful fallback on failure (Groq fully mocked) |
 
 ## Tech stack
 
@@ -379,6 +470,7 @@ pytest tests/ -v
 | Modeling | LightGBM, scikit-learn (k-NN, K-means, preprocessing), pandas |
 | Statistical analysis | scipy (chi-square, Mann-Whitney U), statsmodels (VIF), lifelines (Kaplan-Meier, Cox PH) |
 | Explainability | SHAP (TreeExplainer) |
+| AI Agent Layer | Groq (`openai/gpt-oss-120b` / `-20b`), presentation only - see [AI Agent Layer](#ai-agent-layer) |
 | Model serving | FastAPI |
 | Dashboard | Streamlit, Plotly |
 | Containerization | Docker, docker-compose |
@@ -412,6 +504,7 @@ Everything below was actually run and checked during the build, not just written
 - **Drift detection**: computed for all 12 non-baseline batches against the `batch_001` baseline, both from the host and from inside the `airflow-scheduler` container (proving the DAG runtime can actually execute it). Maximum PSI observed across every feature and every batch pair: **0.0006** — a correct negative result on a pre-shuffled source file, not a silent failure. The 18 tests in `tests/test_drift.py` inject genuine shifts and confirm the detector fires on them.
 - **The drift task was verified in a real DAG run**, not just by parsing. `batch_013` was removed from `ingestion_log`/`customers_cleaned`/`raw_customers` and re-ingested through a live triggered run: all 8 tasks succeeded in 97 seconds, and the branch logged its decision from both inputs — `batches: 13 (every 3 -> due=False); drift: max PSI 0.0003 -> detected=False` → `Branch into skip_retrain`, correctly skipping the retrain. Warehouse verified back at 1,000,000 rows afterwards.
 - **Airflow — fully verified end-to-end**, not just built. Two full DAG runs against the live webserver + scheduler (not `airflow tasks test` shortcuts): run 1 ingested `batch_003` and correctly triggered `retrain_churn_model` (3rd batch landed → branch fired, produced a new versioned artifact alongside the original, neither overwritten); run 2 ingested `batch_004` and correctly took the `skip_retrain` branch instead (4th batch, not a multiple of 3). All 7 tasks in both runs ended in `success` (or the intentionally-`skipped` branch). `customer_360` grew exactly as expected across both runs, confirmed by direct row-count query, not just DAG "green" status.
+- **AI Agent Layer — all three agents run against real data from this running platform, not just their 28 mocked tests.** `explain_churn()` verified via a live `curl` to `/explain-churn/CUST0000269643` (`source: "llm"`, a real 32.6% probability, real SHAP factors) and via the dashboard's rebuilt container. `draft_outreach()` verified the same way, and `mentions_service()` confirmed the real draft actually named the real recommended service ("Internet Service"), not a hallucinated one. `summarize_retrain()` was verified as an actual Airflow task in a live DAG run - two batches (`batch_012`, `batch_013`) were reset and re-ingested to force a real retrain, `summarize_retrain` ran and correctly wrote both `report/retrain_summaries/retrain_summary_20260910T154013Z.md` and a Postgres row, and the warehouse was restored to its full 13-batch state afterward. The caching layer was verified to actually skip redundant calls (~4.5s on a miss, ~0.02s on a hit), and the retry/backoff guardrail was exercised for real, not just mocked - generating AI content for 15 real customers in one session genuinely hit Groq's free-tier rate limit mid-run and recovered cleanly (see Deviations).
 
 ## Deviations from the original spec, and why
 
@@ -435,6 +528,10 @@ Everything below was actually run and checked during the build, not just written
 - **Made the recommender serve every customer, not just those in its index.** The k-NN artifact was trained on ~154K customers while `customer_360` held 1M, so id-based lookup left **84.6% of at-risk customers with no recommendation at all** in the dashboard. Added `recommend_for_profile`, which transforms any customer's profile through the saved preprocessor and matches it against the index - reframing the index as a bounded *reference set* rather than a registry of everyone. Coverage went from 15.4% to 100% with no increase in artifact size, and the profile matrix was downcast to float32 (halving it) while there.
 - **Raised the dashboard container's `mem_limit` from 400MB to 768MB.** That limit was set when `customer_360` was tiny; as customer_360 grew past ~300K rows, loading the full mart into pandas plus a loaded model plus Streamlit's own baseline footprint got OOM-killed (exit 137) under the old cap.
 - **Added probability calibration (`CalibratedClassifierCV`, sigmoid), and it broke the dashboard's SHAP column silently.** `class_weight="balanced"` produced scores 3–5x higher than true probabilities (mean predicted 0.41 vs actual 0.10), which calibration fixes — see [Probability calibration](#probability-calibration). But `CalibratedClassifierCV` has no `.named_steps`, which the dashboard's `column_importances` and SHAP `TreeExplainer` both call directly on the artifact's `pipeline`. The failure mode was the worst kind: `column_importances` already catches `AttributeError` and returns `{}` for a different, legitimate reason (older artifact shapes), so this new failure was swallowed by that same handler and the "Risk factors (SHAP)" column silently rendered empty with no exception anywhere. Caught by reading the actual screenshot after the retrain rather than trusting that "the API responds correctly" meant the dashboard was fine too. Fixed by saving the pre-calibration pipeline in the artifact as `base_pipeline` and routing explainability through it, and pinned with 5 new tests in `tests/test_dashboard.py` that build both pipeline shapes directly and assert the routing rule holds.
+- **The two Groq models originally chosen for the AI Agent Layer (`llama-3.3-70b-versatile`, `llama-3.1-8b-instant`) had been fully retired from Groq's catalog by the time this ran end to end.** The very first live call 404'd with `model_not_found` - not an access issue, confirmed by listing `client.models.list()` and finding neither model present at all. Groq's actual current lineup (`openai/gpt-oss-120b`/`-20b`, `qwen/qwen3.6-27b`, `groq/compound`, …) doesn't include either. Replaced with `openai/gpt-oss-120b`/`-20b`, the nearest equivalent pairing Groq does serve, in the same quality/speed roles originally intended. This is real production risk worth naming plainly: pinning a third-party model ID is pinning something that can be retired out from under you with no warning, unlike a pinned pip package version.
+- **Both replacement models are reasoning models, and the first real call came back with an empty completion.** `openai/gpt-oss-*` spend part of the token budget on hidden chain-of-thought before the visible answer - measured, a trivial 3-word reply ("connection ok") cost 50-86 total tokens at default settings, so the original `max_tokens=200-250` budgets were consumed by reasoning before any visible text was produced. Fixed two ways: added `reasoning_effort="low"` (cut the same trivial reply's token cost from 50 to 17 with no visible quality loss on these short, constrained-output tasks) and raised every agent's `max_tokens` to 400-500 to leave headroom for both the reasoning overhead and the actual output.
+- **`src/agents/cache.py`'s read path had a bug that would have crashed the very first real call.** `get_or_generate()` checks the cache before generating, but `get_cached_content()` (the read) didn't call `ensure_tables()` the way `put_cached_content()` (the write) did - on a fresh warehouse where nothing had ever been cached yet, that first read hit `relation "public.llm_explanations" does not exist` instead of correctly reporting a cache miss. Caught immediately during live verification (the first real cache test), before it ever reached the dashboard. Fixed by having the read path check `to_regclass()` first and return `None` (a normal miss) when the table doesn't exist yet, matching the pattern `src/monitoring/drift.py` already used for the same class of problem.
+- **Real rate limiting was hit and handled, not just simulated in tests.** Generating AI explanations and outreach drafts for 15 real customers in one dashboard session (up to 30 real calls in quick succession) triggered genuine `429 Too Many Requests` responses from Groq's free tier mid-run, visible in the container logs. The exponential-backoff retry in `groq_client.complete()` recovered every one of them - the dashboard session completed with real AI content for all 15 customers, no failures surfaced to the user.
 
 ## Limitations
 
@@ -448,6 +545,7 @@ Everything below was actually run and checked during the build, not just written
 - **Per-customer explanations are real SHAP values, computed only for the displayed subset.** `TreeExplainer` runs against the bounded set of rows actually on screen (at most 500), never the full 1M-row table — an intentional cost/scale trade-off, not a full-population attribution.
 - **Dashboard verification now includes real browser screenshots** (headless Chromium via Playwright against the running container — every image in [The dashboard](#the-dashboard) is a live capture), in addition to Streamlit's `AppTest` runner. Two rendering defects were found and fixed this way that `AppTest` could not surface, because both were layout problems rather than exceptions: a KPI value truncated to `$26,051...`, and the SHAP column clipped mid-phrase.
 - **This machine's network was unusually slow throughout the build** (a 40MB Kaggle download took ~11 minutes; the Airflow Docker image took well over an hour to build, twice, due to the sqlalchemy-pin fix requiring a second build). If you rebuild on a faster connection, expect this to go much quicker.
+- **The AI Agent Layer is a presentation layer over frozen predictions, not a modeling improvement** - it never sees a feature the model didn't already use, and it cannot change a churn probability, a SHAP ranking, or a recommendation. Two real, specific caveats from live verification: (1) SHAP factor names for categorical features collapse to the base column (e.g. "contract", not "month-to-month") because that mapping is pre-existing and shared with the dashboard's SHAP column, so an explanation can say a factor matters without saying which value of it does; (2) the exact Groq model IDs pinned here (`openai/gpt-oss-120b`/`-20b`) are a live external dependency that already moved once during this project (see Deviations) and could again - unlike a pinned pip package, there's no local copy to fall back to, only the graceful-degradation-to-raw-data behavior this layer was built with from the start.
 
 ## License
 
