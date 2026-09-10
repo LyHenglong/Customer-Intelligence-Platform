@@ -2,6 +2,30 @@
 
 A production-style data platform that predicts telecom customer churn and recommends services to at-risk customers, built on a large-scale synthetic dataset to demonstrate a realistic enterprise data pipeline: simulated batch ingestion, DuckDB processing, a dbt transformation layer with a Customer 360 mart, predictive modeling, and live serving — orchestrated end to end with Airflow.
 
+## The dashboard
+
+The platform's user-facing surface is an executive retention dashboard, served by Streamlit and scoring all 1,000,000 customers live against the latest model artifact. Every figure below is real output from a running instance, not a mockup.
+
+![Retention Command Center - executive overview](docs/images/dashboard-overview.png)
+
+Headline KPIs sit above a view selector; the banner under the title keeps the synthetic-data caveat visible on every screen rather than burying it in documentation.
+
+![At-risk customers with per-customer SHAP explanations](docs/images/dashboard-at-risk-customers.png)
+
+The **At-Risk Customers** view is the operational one: a ranked action list where each row carries a *per-customer* SHAP explanation (▲ = pushes risk up) and a concrete next-best-offer from the recommender — not a single global feature-importance chart applied to everyone.
+
+![Model performance, including the metrics that aren't flattering](docs/images/dashboard-model-performance.png)
+
+**Model Performance** reports the model as it actually is: AUC 0.652, recall 0.60 at the chosen threshold, and precision 0.15. The low precision is a deliberate consequence of the threshold rationale shown on the same screen — see [Limitations](#limitations) and `notebooks/threshold_and_business_value.ipynb` for why a low-precision, high-recall operating point is the correct choice for this retention problem.
+
+![Churn rate across demographic segments](docs/images/dashboard-segments.png)
+
+The **Segments** view doubles as a visual confirmation of a negative result: churn rate is essentially flat across education, marital status, and gender. That matches the formal chi-square testing in `notebooks/eda_and_statistical_analysis.ipynb`, where none of the demographic variables reached practical significance.
+
+![Batch ingestion and retraining status](docs/images/dashboard-pipeline-status.png)
+
+**Pipeline Status** exposes the orchestration layer to the same audience: batches ingested (13/13), batches remaining until the next conditional retrain, and the number of model versions trained to date (7).
+
 ## Motivation
 
 Customer churn is one of the most common and well-understood problems in data science, and pairing it with a recommendation system demonstrates two distinct modeling techniques within one coherent business narrative: **predict who's about to leave, then recommend something that gives them a reason to stay.**
@@ -44,8 +68,12 @@ Kaggle CSV (1,000,000 rows, synthetic)
         │                         → marts.customer_360 (37 dbt tests)
         ├─ dbt_test
         │
-        └─ check_retrain_needed ─┬─► retrain_churn_model (every 3rd batch,
-                                  │    versioned artifact, never overwritten)
+        ├─ detect_feature_drift ► PSI vs the baseline batch across 19
+        │                         features ──► public.feature_drift
+        │
+        └─ check_retrain_needed ─┬─► retrain_churn_model (every 3rd batch OR
+                                  │    any feature PSI ≥ 0.25; versioned
+                                  │    artifact, never overwritten)
                                   └─► skip_retrain (otherwise)
 
 customer_360 (one row per customer: demographics, account, services,
@@ -74,7 +102,7 @@ customer_360 (one row per customer: demographics, account, services,
 ```
 .
 ├── dags/
-│   └── churn_pipeline.py          # Airflow DAG: ingest -> dbt run/test -> conditional retrain
+│   └── churn_pipeline.py          # Airflow DAG: ingest -> dbt run/test -> drift check -> conditional retrain
 ├── src/
 │   ├── warehouse.py               # server-side-cursor streaming reads (see Deviations)
 │   ├── ingest/
@@ -85,6 +113,8 @@ customer_360 (one row per customer: demographics, account, services,
 │   │   ├── train_recommender.py   # trains the content-based recommender, saves versioned artifact
 │   │   ├── threshold_analysis.py  # expected-value threshold selection (cost/benefit model)
 │   │   └── api.py                 # FastAPI app: /predict-churn and /recommend
+│   ├── monitoring/
+│   │   └── drift.py               # PSI drift detection between batches (see Drift monitoring)
 │   └── dashboard/
 │       └── app.py                 # Streamlit dashboard, reads customer_360 directly
 ├── dbt/
@@ -96,7 +126,7 @@ customer_360 (one row per customer: demographics, account, services,
 │   ├── dbt_project.yml
 │   └── profiles.yml
 ├── db/
-│   └── schema.sql                  # raw_customers, customers_cleaned, ingestion_log DDL
+│   └── schema.sql                  # raw_customers, customers_cleaned, ingestion_log, feature_drift DDL
 ├── data/
 │   └── raw/                        # batch_001.csv ... batch_013.csv (gitignored, regenerate via split_batches.py)
 ├── notebooks/
@@ -106,7 +136,10 @@ customer_360 (one row per customer: demographics, account, services,
 ├── tests/
 │   ├── fixtures/sample_batch.csv
 │   ├── test_ingest.py              # 7 tests: DuckDB cleaning/validation/feature logic
-│   └── test_model.py               # 13 tests: expected-value math, threshold selection, recommender invariants
+│   ├── test_model.py               # 13 tests: expected-value math, threshold selection, recommender invariants
+│   └── test_drift.py               # 18 tests: PSI correctness, incl. shifts the detector must catch
+├── docs/
+│   └── images/                     # dashboard screenshots used in this README
 ├── report/
 │   └── findings.md                 # business-facing write-up (synthetic-data caveat up front)
 ├── docker/
@@ -161,6 +194,43 @@ Beyond the production pipeline, `notebooks/eda_and_statistical_analysis.ipynb` i
 - **SHAP explainability**: TreeExplainer on the production LightGBM model, both as a global summary plot and individual waterfall plots for specific high-risk and low-risk customers. This same SHAP logic is also used live in the **dashboard's At-Risk Customers view** (`compute_shap_risk_factors` in `src/dashboard/app.py`) — replacing an earlier global-feature-importance heuristic with real per-customer explanations (bounded to the displayed rows, not the full 1M-row table, for memory reasons).
 
 See the notebook itself for full output, and `report/findings.md` for the business-facing summary of these findings.
+
+## Drift monitoring
+
+Every batch that arrives is scored against a fixed baseline batch using the **Population Stability Index**, the standard drift metric in credit-risk and churn modeling:
+
+```
+PSI = sum over bins of  (actual% - expected%) * ln(actual% / expected%)
+
+PSI < 0.10          stable        - no action
+0.10 <= PSI < 0.25  moderate      - investigate
+PSI >= 0.25         significant   - retrain
+```
+
+19 features are monitored (14 numeric, 5 categorical). Results are written to `public.feature_drift` by the DAG's `detect_feature_drift` task and surfaced on the dashboard's Pipeline Status view.
+
+![Feature drift monitoring](docs/images/dashboard-drift.png)
+
+This turns retraining into a two-trigger decision rather than a fixed cadence:
+
+| Trigger | Condition | Rationale |
+| --- | --- | --- |
+| Cadence | every 3rd batch | the model never silently goes stale |
+| Evidence | any feature PSI ≥ 0.25 | the incoming distribution no longer matches the training distribution |
+
+Three implementation choices worth calling out, because they are where naive PSI implementations go wrong:
+
+- **Bin edges come from the reference distribution only**, never recomputed per batch. Re-binning on the new data makes every batch look identical to itself and hides precisely the shift being measured.
+- **NULLs are their own bucket**, not dropped. A feature whose missing rate jumps from 3% to 40% has drifted in the way that matters most operationally; dropping NULLs scores that as perfectly stable.
+- **The outer bin edges are open** (`-inf`, `+inf`), so values beyond the reference range — the most obvious kind of drift — land in the end bins instead of being silently discarded as out-of-range.
+
+**The honest result on this dataset: no drift, as expected.** All 13 batches are sequential slices of one pre-shuffled source file, so the maximum PSI observed across every feature and every batch pair is **0.0006** — three orders of magnitude below the "investigate" threshold. That is the correct answer for this data, not a broken detector. Evidence that the detector does fire lives in `tests/test_drift.py` (18 tests), which injects real shifts and asserts they are caught: mean shifts, variance shifts with an unchanged mean, missingness jumps, unseen categorical levels, and out-of-range values.
+
+Run it manually against any ingested batch:
+
+```bash
+python -m src.monitoring.drift batch_013.csv
+```
 
 ## How to run
 
@@ -219,6 +289,14 @@ dbt test
 pytest tests/ -v
 ```
 
+38 tests, all operating on synthetic in-memory fixtures — no database, no Docker, and no trained model artifact required, which is what lets the GitHub Actions workflow run them on a clean checkout.
+
+| File | Tests | Covers |
+| --- | --- | --- |
+| `test_ingest.py` | 7 | DuckDB type coercion, quality-gate filtering, engineered-feature logic |
+| `test_model.py` | 13 | expected-value math, threshold selection, recommender invariants |
+| `test_drift.py` | 18 | PSI correctness, and the shifts the detector is required to catch |
+
 ## Tech stack
 
 | Category | Tools |
@@ -244,11 +322,21 @@ Everything below was actually run and checked during the build, not just written
 - **Postgres**: up, reachable, both databases (`warehouse`, `airflow_meta`) and all three dbt schemas created.
 - **Ingestion**: ran on 4 batches total (`batch_001`–`batch_004`, 2 manually + 2 via the Airflow DAG). Verified row counts, type coercion, boolean conversion, NULL preservation (null rates in `customers_cleaned` matched the source file's null rates within rounding), and feature engineering values by hand.
 - **dbt**: `dbt run` builds all 9 models; `dbt test` passes all 37 tests, re-verified after every batch. `customer_360` grew in exact lockstep with batches ingested (76,924 x n), confirming append-not-replace behavior, through all 13 batches to the full **1,000,000 rows**.
-- **Churn model**: originally RandomForest, trained twice via the DAG (76,924-row baseline and a 230,772-row auto-retrain), then replaced after a dedicated model-improvement investigation (`notebooks/model_dev_offline.py`) compared RandomForest/XGBoost/LightGBM/Logistic Regression, SMOTE vs. `class_weight`, and ran 5-fold cross-validation on the full 1,000,000-row dataset. **LightGBM won by a small, cross-validation-confirmed margin** (AUC 0.683 ± 0.002 vs RandomForest's 0.677) and is now the production model, with a business-chosen decision threshold (0.512, guaranteeing recall ≥ 0.60) instead of the default 0.5. Current test-set metrics: churn-class precision 0.16, recall 0.60, F1 0.26; ROC AUC 0.683. See "Limitations" and `report/findings.md` — this is still a modest model, and that's discussed honestly, not hidden.
+- **Churn model**: originally RandomForest, trained twice via the DAG (76,924-row baseline and a 230,772-row auto-retrain), then replaced after a dedicated model-improvement investigation (`notebooks/model_dev_offline.py`) compared RandomForest/XGBoost/LightGBM/Logistic Regression, SMOTE vs. `class_weight`, and ran 5-fold cross-validation on the full 1,000,000-row dataset. **LightGBM won by a small, cross-validation-confirmed margin** (AUC 0.683 ± 0.002 vs RandomForest's 0.677 over the full 1,000,000 rows) and is now the production model, with a business-chosen decision threshold instead of the default 0.5.
+
+  Two different numbers appear in this project and they are not interchangeable — the deployed model is the *lower* of the two, so it is the one quoted on the dashboard:
+
+  | | Rows | ROC AUC | Purpose |
+  | --- | --- | --- | --- |
+  | Model-selection experiment | 1,000,000 (5-fold CV) | 0.683 ± 0.002 | choosing between model families |
+  | **Deployed artifact** (`20260909T163041Z`) | 150,000 | **0.652** | what actually serves predictions |
+
+  The deployed model trains on a 150,000-row sample because the retrain task runs in-process under Airflow's LocalExecutor on a 3.8GB Docker VM and was SIGKILLed at full scale (see Deviations); AUC was measured to be flat at 0.652–0.683 across sample sizes, so the cap costs little. Its full test-set metrics: precision 0.146, recall 0.600, F1 0.235, threshold 0.451. See "Limitations" and `report/findings.md` — this is still a modest model, and that's discussed honestly, not hidden.
 - **Recommender**: trains in ~3 seconds at this scale; spot-checked recommendations are sane (only recommends services the customer doesn't already have, ranked by neighbor popularity).
-- **FastAPI**: both endpoints tested with a real customer's data pulled from the warehouse. `/predict-churn` returned a probability consistent with that customer's actual (held-out) label; `/recommend` returned 3 ranked un-subscribed services; a 404 for an unknown `customer_id` was also verified. Re-tested after the DAG's auto-retrain to confirm the API correctly picks up and serves the newest versioned artifact — this is also what surfaced the `dill` cross-environment issue above.
-- **Streamlit dashboard**: verified headlessly via Streamlit's `AppTest` runner (no exceptions, 1 data table + 3 charts rendered) rather than a browser screenshot — see Limitations.
-- **pytest**: 7/7 tests pass, covering type validation, invalid-row dropping, NULL preservation, boolean conversion, and feature engineering (including a zero-active-services edge case).
+- **FastAPI**: both endpoints tested with a real customer's data pulled from the warehouse. `/recommend` coverage was re-verified after the warehouse-fallback fix on 40 randomly sampled real customer IDs — 40/40 returned recommendations, against ~15% before the fix — while an ID that genuinely doesn't exist still returns 404 and the container stayed at 258MB of its 400MB limit. `/predict-churn` returned a probability consistent with that customer's actual (held-out) label; `/recommend` returned 3 ranked un-subscribed services; a 404 for an unknown `customer_id` was also verified. Re-tested after the DAG's auto-retrain to confirm the API correctly picks up and serves the newest versioned artifact — this is also what surfaced the `dill` cross-environment issue above.
+- **Streamlit dashboard**: verified headlessly via Streamlit's `AppTest` runner *and* by driving the running container with headless Chromium, capturing all five views (the screenshots in this README are those captures). The browser pass found two layout defects `AppTest` structurally could not — a KPI truncated to `$26,051...` and a clipped SHAP column — both since fixed. Peak container memory during a full five-view capture: 652MB against its 2GB limit.
+- **pytest**: 38/38 pass locally and on GitHub Actions (run `1b1ad9a`, job `test` green including the dependency install). Covers ingestion logic, expected-value/threshold math, recommender invariants, and PSI drift.
+- **Drift detection**: computed for all 12 non-baseline batches against the `batch_001` baseline, both from the host and from inside the `airflow-scheduler` container (proving the DAG runtime can actually execute it). Maximum PSI observed across every feature and every batch pair: **0.0006** — a correct negative result on a pre-shuffled source file, not a silent failure. The 18 tests in `tests/test_drift.py` inject genuine shifts and confirm the detector fires on them.
 - **Airflow — fully verified end-to-end**, not just built. Two full DAG runs against the live webserver + scheduler (not `airflow tasks test` shortcuts): run 1 ingested `batch_003` and correctly triggered `retrain_churn_model` (3rd batch landed → branch fired, produced a new versioned artifact alongside the original, neither overwritten); run 2 ingested `batch_004` and correctly took the `skip_retrain` branch instead (4th batch, not a multiple of 3). All 7 tasks in both runs ended in `success` (or the intentionally-`skipped` branch). `customer_360` grew exactly as expected across both runs, confirmed by direct row-count query, not just DAG "green" status.
 
 ## Deviations from the original spec, and why
@@ -265,7 +353,7 @@ Everything below was actually run and checked during the build, not just written
 - **Airflow's DAG has one `ingest_next_batch` task, not three separate "ingest / DuckDB / load" tasks.** `batch_loader.py` does all three as a single Postgres transaction by design (so a failed/retried batch never leaves the warehouse half-loaded). Splitting that into separate Airflow tasks would mean persisting intermediate DuckDB output between tasks purely to match a step count, adding fragility for no real benefit.
 - **13 batches, not 10–15's midpoint.** `1,000,000 / 13 ≈ 76,924` rows/batch; chosen so that `RETRAIN_EVERY_N_BATCHES=3` produces 4 retraining events across a full run (batches 3, 6, 9, 12) — a clean demonstration of the periodic-retrain mechanism.
 - **DAG is manually triggered (`schedule=None`), not on a wall-clock schedule.** A DAG run represents one simulated batch "arriving"; a real time-based schedule would misrepresent what's actually a replay of static historical data.
-- **Churn model switched from RandomForest to LightGBM, plus a business-chosen decision threshold (0.512, not 0.5).** Mid-build, Docker Desktop's WSL2 backend crashed after the host machine's C: drive filled to 0 bytes free during earlier image builds, corrupting the VM's disk mid-write and requiring a full machine restart to recover. While Docker/Postgres were unavailable, that downtime was used to run a dedicated model-improvement investigation (`notebooks/model_dev_offline.py`) entirely offline — reconstructing `customer_360`-equivalent data straight from the local batch CSVs via `batch_loader.py`'s own DuckDB logic, no database required. The investigation compared RandomForest/XGBoost/LightGBM/Logistic Regression and SMOTE vs. `class_weight` on the full 1,000,000-row dataset with 5-fold cross-validation, and found LightGBM gives a small, real, CV-confirmed edge (full detail in `report/findings.md`). The production `train_churn.py` and `api.py` were updated to match, and re-verified against a live `/predict-churn` request before moving on.
+- **Churn model switched from RandomForest to LightGBM, plus a business-chosen decision threshold (0.451 in the current artifact, not 0.5).** The threshold is re-derived at every retrain as the highest cut-off still meeting the recall ≥ 0.60 floor, so it moves with the data rather than being a constant; it is saved inside the artifact and read back by both the API and the dashboard. Mid-build, Docker Desktop's WSL2 backend crashed after the host machine's C: drive filled to 0 bytes free during earlier image builds, corrupting the VM's disk mid-write and requiring a full machine restart to recover. While Docker/Postgres were unavailable, that downtime was used to run a dedicated model-improvement investigation (`notebooks/model_dev_offline.py`) entirely offline — reconstructing `customer_360`-equivalent data straight from the local batch CSVs via `batch_loader.py`'s own DuckDB logic, no database required. The investigation compared RandomForest/XGBoost/LightGBM/Logistic Regression and SMOTE vs. `class_weight` on the full 1,000,000-row dataset with 5-fold cross-validation, and found LightGBM gives a small, real, CV-confirmed edge (full detail in `report/findings.md`). The production `train_churn.py` and `api.py` were updated to match, and re-verified against a live `/predict-churn` request before moving on.
 - **Added `libgomp1` to all three Docker images (`api`, `dashboard`, `airflow`).** After switching to LightGBM, the `api` container crashed on startup with `OSError: libgomp.so.1: cannot open shared object file` — LightGBM's native library dlopen()s GNU OpenMP at import time, which the `python:3.11-slim` base image doesn't include by default. The same import chain reaches the dashboard (via `src.model.train_churn`) and the Airflow retrain task, so all three images needed the fix, not just the one that happened to surface it first.
 - **Gave the three Airflow services (`airflow-init`, `airflow-webserver`, `airflow-scheduler`) one shared `image:` tag instead of letting each build separately.** Without an explicit `image:` on the shared `x-airflow-common` anchor, Docker Compose tags each service's build by service name even when they share the exact same Dockerfile/context — so rebuilding `airflow-init` alone (to pick up the `libgomp1` fix) silently left `airflow-webserver`/`airflow-scheduler` on the stale pre-fix image. Caught by explicitly testing `import lightgbm` inside the scheduler container after a rebuild that looked successful.
 - **Rewrote the dashboard's data layer to stream instead of loading the whole mart.** Once `customer_360` reached 1,000,000 rows the dashboard OOM-killed in its container: it was loading every row into a DataFrame (~620MB) and then letting the preprocessor materialize a dense 1M x 54 float64 matrix (412MB) on top, just to surface ~100 at-risk customers. It now makes one streaming pass that scores in batches and keeps only `(customer_id, churn_probability, monthlycharges)` per customer (~40MB), pulls full rows for the handful actually displayed by id, and computes every segment chart as a SQL `GROUP BY` rather than a pandas groupby over a million rows. Peak memory is now bounded by batch size rather than table size.
@@ -279,11 +367,11 @@ Everything below was actually run and checked during the build, not just written
 - **DuckDB was used in place of Spark due to local hardware constraints (8GB RAM, often <1GB free in practice).** The pipeline's per-batch DuckDB step is fast at this scale (~77K rows/batch, well under a second); it was not tested against a distributed engine at larger scale.
 - **Simulated batch ingestion replays a static, pre-existing dataset rather than genuine streaming arrivals**, and batches are triggered manually rather than on a wall-clock schedule (see Deviations).
 - **The recommendation system uses content-based filtering only** (k-NN over demographic/account/usage profile vectors, recommending services popular among a customer's nearest neighbors). A real production system would likely combine this with collaborative filtering and online feedback signals.
-- **Retraining is triggered on a simple batch-count rule** (every 3rd batch) **rather than genuine model-drift monitoring**, which a real production system would use instead.
+- **Drift-triggered retraining is implemented, but this dataset cannot exercise it.** The pipeline computes per-feature PSI for every arriving batch and retrains when any feature crosses the 0.25 band (see [Drift monitoring](#drift-monitoring)). Because all 13 batches are slices of one pre-shuffled file, the measured drift is ~0.0004 across every feature and the cadence rule (every 3rd batch) is what actually fires in practice. The detector's ability to fire is demonstrated in `tests/test_drift.py`, not by this data.
 - **Churn model performance is modest, and this was investigated, not assumed.** A dedicated experiment (`notebooks/model_dev_offline.py`) compared 4 model families, SMOTE vs. class-weighting, and cross-validated the winner on the full 1M-row dataset. Best result: LightGBM, AUC 0.683 ± 0.002 (5-fold CV) — a small, real improvement over the original RandomForest (0.677), but nothing tried closes the gap to a "strong" classifier. This looks like a genuine ceiling in the synthetic data's individual-level signal (segment-level signal is much stronger — e.g. contract type alone separates a 4.8x churn-rate gap) rather than a fixable modeling gap.
-- **The FastAPI `/predict-churn` and `/recommend` endpoints have no DB dependency at request time by design** (they load a versioned artifact into memory at startup). This means `/recommend` only works for `customer_id`s that existed in the training set at the time the recommender was last trained — a new customer added in a later batch won't have recommendations until the recommender is retrained.
-- **The Streamlit dashboard's "key risk factors" column is a simple heuristic** (the customer's own values for the model's globally-most-important features), not a per-customer explainability method like SHAP.
-- **Dashboard verification used Streamlit's headless `AppTest` runner, not a live browser screenshot** — `chromium-cli` wasn't available in this environment and installing Playwright's browser binaries over the observed network speed (~70KB/s) was impractical within this session. `AppTest` confirmed the script executes with no exceptions and renders the expected table + 3 charts, but a human should still open http://localhost:8501 once to sanity-check the visual layout.
+- **`/recommend` answers for any customer in the warehouse, but not identically fast for all of them.** The recommender's k-NN reference set is deliberately bounded (~154K profiles) to keep the artifact small; a customer outside it (about 85% of the 1M, so the normal case) triggers one indexed warehouse lookup and is then matched against that index. Coverage is 100% — verified on a random sample of 40 real customer IDs — but those requests do touch Postgres, unlike `/predict-churn`, which remains purely in-memory.
+- **Per-customer explanations are real SHAP values, computed only for the displayed subset.** `TreeExplainer` runs against the bounded set of rows actually on screen (at most 500), never the full 1M-row table — an intentional cost/scale trade-off, not a full-population attribution.
+- **Dashboard verification now includes real browser screenshots** (headless Chromium via Playwright against the running container — every image in [The dashboard](#the-dashboard) is a live capture), in addition to Streamlit's `AppTest` runner. Two rendering defects were found and fixed this way that `AppTest` could not surface, because both were layout problems rather than exceptions: a KPI value truncated to `$26,051...`, and the SHAP column clipped mid-phrase.
 - **This machine's network was unusually slow throughout the build** (a 40MB Kaggle download took ~11 minutes; the Airflow Docker image took well over an hour to build, twice, due to the sqlalchemy-pin fix requiring a second build). If you rebuild on a faster connection, expect this to go much quicker.
 
 ## Author

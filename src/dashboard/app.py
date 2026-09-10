@@ -333,6 +333,37 @@ def load_ingestion_log() -> pd.DataFrame:
         conn.close()
 
 
+@st.cache_data(ttl=300)
+def load_latest_drift() -> pd.DataFrame:
+    """Per-feature PSI for the most recently scored batch.
+
+    Returns an empty frame (rather than raising) when the table doesn't
+    exist yet - a warehouse that hasn't run the drift task since this
+    feature was added is a normal state, not an error worth breaking the
+    whole view over.
+    """
+    conn = get_pg_conn()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("SELECT to_regclass('public.feature_drift')")
+            if cur.fetchone()[0] is None:
+                return pd.DataFrame()
+        return pd.read_sql(
+            """
+            SELECT feature, feature_type, psi, severity, reference_batch, current_batch
+              FROM public.feature_drift
+             WHERE current_batch = (
+                   SELECT current_batch FROM public.feature_drift
+                    ORDER BY computed_at DESC LIMIT 1
+             )
+             ORDER BY psi DESC
+            """,
+            conn,
+        )
+    finally:
+        conn.close()
+
+
 @st.cache_resource
 def load_latest_artifact(pattern: str):
     matches = sorted(MODELS_DIR.glob(pattern))
@@ -380,6 +411,14 @@ def column_importances(pipeline) -> dict:
             col = name
         grouped[col] = grouped.get(col, 0.0) + float(imp)
     return grouped
+
+
+def compact_currency(value: float) -> str:
+    """Formats a money amount to fit a KPI card ($26.1M, $845.2K, $312)."""
+    for cutoff, suffix in ((1_000_000_000, "B"), (1_000_000, "M"), (1_000, "K")):
+        if abs(value) >= cutoff:
+            return f"${value / cutoff:,.1f}{suffix}"
+    return f"${value:,.0f}"
 
 
 def top_risk_factors(row: pd.Series, importances: dict, top_k: int = 3) -> str:
@@ -519,7 +558,15 @@ def main():
     k1.metric("Total customers", f"{total_customers:,}")
     k2.metric("Historical churn rate", f"{overall_churn_rate:.1%}")
     k3.metric("At-risk now", f"{n_at_risk:,}", help=f"churn_probability ≥ {threshold:.2f}")
-    k4.metric("Monthly revenue at risk", f"${revenue_at_risk:,.0f}", help="Sum of monthlycharges for at-risk customers")
+    k4.metric(
+        "Monthly revenue at risk",
+        compact_currency(revenue_at_risk),
+        # Abbreviated, not full digits: st.metric renders one line inside a
+        # narrow KPI card and silently truncates ("$26,051...") once the
+        # number passes ~8 characters - at 1M customers it always does. The
+        # exact figure stays available on hover.
+        help=f"Sum of monthlycharges for at-risk customers (exact: ${revenue_at_risk:,.0f})",
+    )
     k5.metric("Model AUC", f"{latest_auc:.3f}" if latest_auc else "n/a", help=f"Model version {churn_version}")
 
     # st.radio (styled as a tab bar via CSS), not st.tabs: Streamlit's
@@ -639,7 +686,7 @@ def main():
                 ),
                 "monthly_charges": st.column_config.NumberColumn("Monthly charges", format="$%.2f"),
                 "tenure_months": st.column_config.NumberColumn("Tenure (months)"),
-                "key_risk_factors": st.column_config.TextColumn("Risk factors (SHAP)", width="medium"),
+                "key_risk_factors": st.column_config.TextColumn("Risk factors (SHAP)", width="large"),
             },
         )
 
@@ -745,6 +792,59 @@ def main():
                 "loaded_at": st.column_config.DatetimeColumn("Loaded at", format="YYYY-MM-DD HH:mm"),
             },
         )
+
+        # ------------------------------------------------------ drift
+        st.markdown("&nbsp;")
+        section_header("MONITORING", "Feature drift (PSI)")
+
+        drift_df = load_latest_drift()
+        if drift_df.empty:
+            st.info(
+                "No drift scores recorded yet. They are written by the pipeline's "
+                "`detect_feature_drift` task, or on demand with "
+                "`python -m src.monitoring.drift <batch_file>`."
+            )
+        else:
+            current_batch = drift_df["current_batch"].iloc[0]
+            reference_batch = drift_df["reference_batch"].iloc[0]
+            max_psi = float(drift_df["psi"].max())
+            n_significant = int((drift_df["severity"] == "significant").sum())
+            n_moderate = int((drift_df["severity"] == "moderate").sum())
+
+            d1, d2, d3 = st.columns(3)
+            d1.metric(
+                "Highest PSI", f"{max_psi:.4f}",
+                help="Population Stability Index: <0.10 stable, 0.10-0.25 moderate, >=0.25 significant",
+            )
+            d2.metric("Features drifted", f"{n_significant}", help="PSI >= 0.25 - triggers a retrain")
+            d3.metric("Features to watch", f"{n_moderate}", help="PSI between 0.10 and 0.25")
+
+            if n_significant:
+                st.error(
+                    f"{n_significant} feature(s) have drifted significantly in **{current_batch}** "
+                    f"relative to **{reference_batch}** — the pipeline retrains on this signal."
+                )
+            else:
+                st.success(
+                    f"All {len(drift_df)} monitored features stable in **{current_batch}** "
+                    f"relative to the **{reference_batch}** baseline (highest PSI {max_psi:.4f})."
+                )
+
+            st.caption(
+                "Every batch here is a slice of one pre-shuffled source file, so near-zero PSI is the "
+                "expected — and correct — result. The detector's ability to fire on genuinely shifted "
+                "data is covered by `tests/test_drift.py` rather than by this screen."
+            )
+            st.dataframe(
+                drift_df[["feature", "feature_type", "psi", "severity"]],
+                use_container_width=True, hide_index=True,
+                column_config={
+                    "feature": st.column_config.TextColumn("Feature"),
+                    "feature_type": st.column_config.TextColumn("Type"),
+                    "psi": st.column_config.NumberColumn("PSI", format="%.5f"),
+                    "severity": st.column_config.TextColumn("Status"),
+                },
+            )
 
 
 if __name__ == "__main__":

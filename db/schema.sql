@@ -104,3 +104,19 @@ CREATE TABLE IF NOT EXISTS public.customers_cleaned (
 );
 
 CREATE INDEX IF NOT EXISTS idx_customers_cleaned_source_batch ON public.customers_cleaned (source_batch);
+
+-- Per-feature PSI drift scores, one row per (reference batch, current
+-- batch, feature). Written by src/monitoring/drift.py from the DAG's
+-- detect_feature_drift task; read by the dashboard's Pipeline Status view.
+-- Also created on demand by ensure_drift_table() so the module works
+-- against a warehouse that predates this file.
+CREATE TABLE IF NOT EXISTS public.feature_drift (
+    reference_batch TEXT NOT NULL,
+    current_batch   TEXT NOT NULL,
+    feature         TEXT NOT NULL,
+    feature_type    TEXT NOT NULL,
+    psi             DOUBLE PRECISION NOT NULL,
+    severity        TEXT NOT NULL,
+    computed_at     TIMESTAMP NOT NULL DEFAULT now(),
+    PRIMARY KEY (reference_batch, current_batch, feature)
+);

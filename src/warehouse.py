@@ -41,6 +41,7 @@ def stream_query(
     columns: list[str],
     batch_rows: int = 50_000,
     transform=None,
+    params=None,
 ) -> pd.DataFrame:
     """Runs `query` through a server-side cursor and assembles a DataFrame
     from batches of `batch_rows`.
@@ -52,6 +53,10 @@ def stream_query(
     accumulated. Use it to downcast dtypes (e.g. object -> category) while
     only one batch is in the expensive representation at a time, rather
     than converting once at the end when every batch is already resident.
+
+    `params` is passed straight to psycopg2's execute, so callers filtering
+    on a runtime value (a batch name, a customer id) can use %s / %(name)s
+    placeholders instead of interpolating into the SQL string themselves.
     """
     conn = get_pg_conn()
     try:
@@ -59,7 +64,7 @@ def stream_query(
         # read happens inside this one transaction.
         with conn.cursor(name="warehouse_stream") as cur:
             cur.itersize = batch_rows
-            cur.execute(query)
+            cur.execute(query, params)
 
             frames = []
             while True:

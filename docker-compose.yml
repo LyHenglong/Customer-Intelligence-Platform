@@ -125,6 +125,17 @@ services:
     build:
       context: .
       dockerfile: docker/Dockerfile.api
+    environment:
+      # /recommend falls back to a warehouse lookup when a customer isn't in
+      # the recommender's bounded reference set - the common case at 1M
+      # customers. Predictions and index hits still need no DB at all.
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: "5432"
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    depends_on:
+      - postgres
     ports:
       - "8000:8000"
     volumes:
