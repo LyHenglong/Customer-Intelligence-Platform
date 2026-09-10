@@ -14,6 +14,7 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 COPY src/__init__.py /app/src/__init__.py
+COPY src/warehouse.py /app/src/warehouse.py
 COPY src/model /app/src/model
 COPY src/dashboard /app/src/dashboard
 COPY models_store /app/models_store

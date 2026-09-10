@@ -76,12 +76,14 @@ customer_360 (one row per customer: demographics, account, services,
 ├── dags/
 │   └── churn_pipeline.py          # Airflow DAG: ingest -> dbt run/test -> conditional retrain
 ├── src/
+│   ├── warehouse.py               # server-side-cursor streaming reads (see Deviations)
 │   ├── ingest/
 │   │   ├── split_batches.py       # one-time: splits the Kaggle CSV into 13 batch files
 │   │   └── batch_loader.py        # picks up next batch, DuckDB clean/validate/engineer, loads to Postgres
 │   ├── model/
 │   │   ├── train_churn.py         # trains + evaluates the churn classifier, saves versioned artifact
 │   │   ├── train_recommender.py   # trains the content-based recommender, saves versioned artifact
+│   │   ├── threshold_analysis.py  # expected-value threshold selection (cost/benefit model)
 │   │   └── api.py                 # FastAPI app: /predict-churn and /recommend
 │   └── dashboard/
 │       └── app.py                 # Streamlit dashboard, reads customer_360 directly
@@ -98,11 +100,13 @@ customer_360 (one row per customer: demographics, account, services,
 ├── data/
 │   └── raw/                        # batch_001.csv ... batch_013.csv (gitignored, regenerate via split_batches.py)
 ├── notebooks/
-│   ├── model_dev_offline.py         # offline model-comparison experiment (see report/findings.md)
-│   └── eda_and_statistical_analysis.ipynb  # chi-square/Mann-Whitney tests, survival analysis, clustering, SHAP
+│   ├── model_dev_offline.py                    # offline model-comparison experiment
+│   ├── eda_and_statistical_analysis.ipynb      # significance tests, survival analysis, clustering, SHAP
+│   └── threshold_and_business_value.ipynb      # expected-value threshold + calibration analysis
 ├── tests/
 │   ├── fixtures/sample_batch.csv
-│   └── test_ingest.py              # 7 unit tests for the DuckDB cleaning/validation/feature logic
+│   ├── test_ingest.py              # 7 tests: DuckDB cleaning/validation/feature logic
+│   └── test_model.py               # 13 tests: expected-value math, threshold selection, recommender invariants
 ├── report/
 │   └── findings.md                 # business-facing write-up (synthetic-data caveat up front)
 ├── docker/
@@ -152,9 +156,9 @@ Beyond the production pipeline, `notebooks/eda_and_statistical_analysis.ipynb` i
 - **Significance testing**: chi-square tests (with Cramer's V effect size) for every categorical feature against churn, and Mann-Whitney U tests (with rank-biserial effect size) for every numeric feature. Finding: `contract` and `tenure_bucket` are genuinely associated with churn; `gender`, `education`, `marital_status`, and `payment_method` are **not** statistically significant at all — no demographic "churn persona" is supported by this data.
 - **Statistical vs. practical significance**: at 300K+ rows, several features reach p < 0.05 with a practically negligible effect size (e.g. `monthlycharges`, hazard ratio ≈ 0.998 per dollar) — called out explicitly rather than reported as a bare "significant!" p-value.
 - **Correlation & multicollinearity**: a correlation heatmap plus Variance Inflation Factors across key numeric features.
-- **Survival analysis**: Kaplan-Meier curves (overall and by contract type) and a Cox Proportional Hazards model — modeling *time to churn* directly, which the binary classifier discards. `is_month_to_month` carries a hazard ratio of ~2.86 (holding other factors constant); concordance index 0.62.
+- **Survival analysis**: Kaplan-Meier curves (overall and by contract type) and a Cox Proportional Hazards model — modeling *time to churn* directly, which the binary classifier discards. `is_month_to_month` carries a hazard ratio of ~2.77 (holding other factors constant); concordance index 0.617. Kaplan-Meier: 94.7% of customers still active at 12 months tenure, 90.2% at 24, 82.1% at 48.
 - **Unsupervised customer segmentation**: K-means clustering on profile features (age, income, tenure, charges, satisfaction, usage, service count), with an elbow/silhouette analysis to choose k and a PCA projection to visualize it. Reported honestly: silhouette scores are modest (~0.14–0.16), meaning the natural cluster structure is soft, not sharply separated — stated plainly rather than overclaimed.
-- **SHAP explainability**: TreeExplainer on the production LightGBM model, both as a global summary plot and individual waterfall plots for specific high-risk and low-risk customers. This same SHAP logic is also used live in the **dashboard's At-Risk Customers view** (`compute_shap_risk_factors` in `src/dashboard/app.py`) — replacing an earlier global-feature-importance heuristic with real per-customer explanations (bounded to the displayed rows, not the full 307K+ table, for memory reasons).
+- **SHAP explainability**: TreeExplainer on the production LightGBM model, both as a global summary plot and individual waterfall plots for specific high-risk and low-risk customers. This same SHAP logic is also used live in the **dashboard's At-Risk Customers view** (`compute_shap_risk_factors` in `src/dashboard/app.py`) — replacing an earlier global-feature-importance heuristic with real per-customer explanations (bounded to the displayed rows, not the full 1M-row table, for memory reasons).
 
 See the notebook itself for full output, and `report/findings.md` for the business-facing summary of these findings.
 
@@ -239,7 +243,7 @@ Everything below was actually run and checked during the build, not just written
 
 - **Postgres**: up, reachable, both databases (`warehouse`, `airflow_meta`) and all three dbt schemas created.
 - **Ingestion**: ran on 4 batches total (`batch_001`–`batch_004`, 2 manually + 2 via the Airflow DAG). Verified row counts, type coercion, boolean conversion, NULL preservation (null rates in `customers_cleaned` matched the source file's null rates within rounding), and feature engineering values by hand.
-- **dbt**: `dbt run` builds all 9 models; `dbt test` passes all 37 tests, re-verified after every batch. `customer_360` grew 76,924 → 153,848 → 230,772 → 307,696 rows in exact lockstep with batches ingested (76,924 × n), confirming append-not-replace behavior.
+- **dbt**: `dbt run` builds all 9 models; `dbt test` passes all 37 tests, re-verified after every batch. `customer_360` grew in exact lockstep with batches ingested (76,924 x n), confirming append-not-replace behavior, through all 13 batches to the full **1,000,000 rows**.
 - **Churn model**: originally RandomForest, trained twice via the DAG (76,924-row baseline and a 230,772-row auto-retrain), then replaced after a dedicated model-improvement investigation (`notebooks/model_dev_offline.py`) compared RandomForest/XGBoost/LightGBM/Logistic Regression, SMOTE vs. `class_weight`, and ran 5-fold cross-validation on the full 1,000,000-row dataset. **LightGBM won by a small, cross-validation-confirmed margin** (AUC 0.683 ± 0.002 vs RandomForest's 0.677) and is now the production model, with a business-chosen decision threshold (0.512, guaranteeing recall ≥ 0.60) instead of the default 0.5. Current test-set metrics: churn-class precision 0.16, recall 0.60, F1 0.26; ROC AUC 0.683. See "Limitations" and `report/findings.md` — this is still a modest model, and that's discussed honestly, not hidden.
 - **Recommender**: trains in ~3 seconds at this scale; spot-checked recommendations are sane (only recommends services the customer doesn't already have, ranked by neighbor popularity).
 - **FastAPI**: both endpoints tested with a real customer's data pulled from the warehouse. `/predict-churn` returned a probability consistent with that customer's actual (held-out) label; `/recommend` returned 3 ranked un-subscribed services; a 404 for an unknown `customer_id` was also verified. Re-tested after the DAG's auto-retrain to confirm the API correctly picks up and serves the newest versioned artifact — this is also what surfaced the `dill` cross-environment issue above.
@@ -264,7 +268,10 @@ Everything below was actually run and checked during the build, not just written
 - **Churn model switched from RandomForest to LightGBM, plus a business-chosen decision threshold (0.512, not 0.5).** Mid-build, Docker Desktop's WSL2 backend crashed after the host machine's C: drive filled to 0 bytes free during earlier image builds, corrupting the VM's disk mid-write and requiring a full machine restart to recover. While Docker/Postgres were unavailable, that downtime was used to run a dedicated model-improvement investigation (`notebooks/model_dev_offline.py`) entirely offline — reconstructing `customer_360`-equivalent data straight from the local batch CSVs via `batch_loader.py`'s own DuckDB logic, no database required. The investigation compared RandomForest/XGBoost/LightGBM/Logistic Regression and SMOTE vs. `class_weight` on the full 1,000,000-row dataset with 5-fold cross-validation, and found LightGBM gives a small, real, CV-confirmed edge (full detail in `report/findings.md`). The production `train_churn.py` and `api.py` were updated to match, and re-verified against a live `/predict-churn` request before moving on.
 - **Added `libgomp1` to all three Docker images (`api`, `dashboard`, `airflow`).** After switching to LightGBM, the `api` container crashed on startup with `OSError: libgomp.so.1: cannot open shared object file` — LightGBM's native library dlopen()s GNU OpenMP at import time, which the `python:3.11-slim` base image doesn't include by default. The same import chain reaches the dashboard (via `src.model.train_churn`) and the Airflow retrain task, so all three images needed the fix, not just the one that happened to surface it first.
 - **Gave the three Airflow services (`airflow-init`, `airflow-webserver`, `airflow-scheduler`) one shared `image:` tag instead of letting each build separately.** Without an explicit `image:` on the shared `x-airflow-common` anchor, Docker Compose tags each service's build by service name even when they share the exact same Dockerfile/context — so rebuilding `airflow-init` alone (to pick up the `libgomp1` fix) silently left `airflow-webserver`/`airflow-scheduler` on the stale pre-fix image. Caught by explicitly testing `import lightgbm` inside the scheduler container after a rebuild that looked successful.
-- **Raised the dashboard container's `mem_limit` from 400MB to 768MB.** That limit was set when `customer_360` was tiny; at the current 307K+ rows, loading the full mart into pandas plus a loaded model plus Streamlit's own baseline footprint got OOM-killed (exit 137) under the old cap.
+- **Rewrote the dashboard's data layer to stream instead of loading the whole mart.** Once `customer_360` reached 1,000,000 rows the dashboard OOM-killed in its container: it was loading every row into a DataFrame (~620MB) and then letting the preprocessor materialize a dense 1M x 54 float64 matrix (412MB) on top, just to surface ~100 at-risk customers. It now makes one streaming pass that scores in batches and keeps only `(customer_id, churn_probability, monthlycharges)` per customer (~40MB), pulls full rows for the handful actually displayed by id, and computes every segment chart as a SQL `GROUP BY` rather than a pandas groupby over a million rows. Peak memory is now bounded by batch size rather than table size.
+- **Discovered `pd.read_sql(chunksize=...)` does not bound memory with psycopg2.** psycopg2's default cursor is client-side: libpq buffers the *entire* result set before pandas sees a row, so `chunksize` only chunks an already-materialized buffer. This was the real cause behind several OOMs that earlier "chunked read" fixes only partially mitigated, and at 1M rows it fails outright with `out of memory for query result`. All warehouse reads now go through `src/warehouse.py`'s `stream_query`, which uses a named (server-side) cursor.
+- **Made the recommender serve every customer, not just those in its index.** The k-NN artifact was trained on ~154K customers while `customer_360` held 1M, so id-based lookup left **84.6% of at-risk customers with no recommendation at all** in the dashboard. Added `recommend_for_profile`, which transforms any customer's profile through the saved preprocessor and matches it against the index - reframing the index as a bounded *reference set* rather than a registry of everyone. Coverage went from 15.4% to 100% with no increase in artifact size, and the profile matrix was downcast to float32 (halving it) while there.
+- **Raised the dashboard container's `mem_limit` from 400MB to 768MB.** That limit was set when `customer_360` was tiny; as customer_360 grew past ~300K rows, loading the full mart into pandas plus a loaded model plus Streamlit's own baseline footprint got OOM-killed (exit 137) under the old cap.
 
 ## Limitations
 

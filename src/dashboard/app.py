@@ -29,9 +29,11 @@ os.environ.setdefault("LOKY_MAX_CPU_COUNT", str(os.cpu_count() or 4))
 
 load_dotenv()
 
+from src.warehouse import stream_query  # noqa: E402
 from src.model.train_churn import ALL_FEATURES as CHURN_FEATURES  # noqa: E402
 from src.model.train_churn import CATEGORICAL_FEATURES as CHURN_CATEGORICAL  # noqa: E402
-from src.model.train_recommender import recommend_for_customer  # noqa: E402
+from src.model.train_recommender import recommend_for_profile  # noqa: E402
+from src.model.train_recommender import SERVICE_COLUMNS as REC_SERVICE_COLUMNS  # noqa: E402
 
 MODELS_DIR = Path(__file__).resolve().parents[2] / "models_store"
 RETRAIN_EVERY_N_BATCHES = int(os.environ.get("RETRAIN_EVERY_N_BATCHES", "3"))
@@ -211,37 +213,111 @@ def get_pg_conn():
     )
 
 
-@st.cache_data(ttl=300)
-def load_customer_360() -> pd.DataFrame:
-    # Raw psycopg2 connection, not a SQLAlchemy Engine - see the comment in
-    # train_churn.py's load_customer_360 for why (pandas/SQLAlchemy version
-    # mismatch inside the Airflow image breaks the Engine path).
+@st.cache_data(ttl=600, show_spinner="Scoring customers...")
+def score_all_customers(_churn_artifact, churn_version: str, batch_size: int = 25_000) -> pd.DataFrame:
+    """One streaming pass over customer_360, scoring every customer and
+    keeping only a compact per-customer result.
+
+    The dashboard used to load the entire mart into a DataFrame and score
+    it in place. That is fine at 300K rows and fatal at 1M: the frame alone
+    is ~620MB, and the preprocessor materializes a dense (n x 54) float64
+    matrix on top of it (412MB at 1M). Inside a 1GB container that is an
+    OOM kill.
+
+    Instead, rows are streamed from Postgres in batches, scored, and
+    reduced immediately to three columns. Batches are kept small (25K) on
+    purpose: each fetchmany materializes batch_rows x n_columns individual
+    Python objects before pandas builds columnar arrays, so the batch size
+    sets the transient peak far more than the retained result does. The retained result is ~40MB at
+    1M customers regardless of how wide the mart gets, and peak memory is
+    bounded by one batch rather than by the table size. Full rows for the
+    handful of customers actually displayed are fetched by id later.
+    """
+    score_cols = ["customer_id"] + CHURN_FEATURES
+    score_cols = list(dict.fromkeys(score_cols))
+    pipeline = _churn_artifact["pipeline"]
+
+    ids, scores, charges = [], [], []
+
+    def _score_batch(batch: pd.DataFrame) -> pd.DataFrame:
+        X = batch[CHURN_FEATURES].copy()
+        for c in CHURN_FEATURES:
+            if X[c].dtype == bool:
+                X[c] = X[c].astype(float)
+        ids.append(batch["customer_id"].to_numpy())
+        scores.append(pipeline.predict_proba(X)[:, 1].astype(np.float32))
+        charges.append(batch["monthlycharges"].to_numpy(dtype=np.float32))
+        # Return an empty frame: stream_query concatenates whatever comes
+        # back, and we deliberately keep none of the raw rows.
+        return batch.iloc[0:0]
+
+    stream_query(
+        f"SELECT {', '.join(score_cols)} FROM marts.customer_360",
+        columns=score_cols,
+        batch_rows=batch_size,
+        transform=_score_batch,
+    )
+
+    return pd.DataFrame({
+        "customer_id": np.concatenate(ids),
+        "churn_probability": np.concatenate(scores),
+        "monthlycharges": np.concatenate(charges),
+    })
+
+
+@st.cache_data(ttl=600)
+def load_overall_stats() -> dict:
+    """Headline counts straight from SQL - exact, and a few bytes over the
+    wire instead of a million rows."""
     conn = get_pg_conn()
     try:
-        cols = ", ".join(_DASHBOARD_COLUMNS)
-        # chunksize, not a single read_sql call: psycopg2/pandas materialize
-        # the *entire* result as raw Python row-tuples (300K+ rows x 40
-        # cols = ~12M individual Python objects) before converting to a
-        # columnar DataFrame, creating a huge transient memory peak even
-        # though the final DataFrame itself is much smaller. Profiled this
-        # directly: peak RSS jumped ~880MB for a single full read vs. a
-        # final DataFrame of only ~190MB. Chunking bounds how much of that
-        # raw row-tuple form exists at once.
-        # category, not object dtype, for low-cardinality string columns:
-        # object dtype stores each cell as a separate Python string object
-        # (~20MB each for these columns at 300K+ rows); category dtype
-        # stores each unique value once plus integer codes per row. Applied
-        # per chunk, before accumulating - converting only after the full
-        # concat still briefly holds every chunk in expensive object dtype
-        # at once. Profiled this exact sequence directly: dropped peak RSS
-        # from ~1073MB (single unchunked read) to ~747MB.
-        frames = []
-        for chunk in pd.read_sql(f"SELECT {cols} FROM marts.customer_360", conn, chunksize=10_000):
-            for c in CHURN_CATEGORICAL:  # gender, education, marital_status, contract, payment_method, tenure_bucket
-                if c in chunk.columns:
-                    chunk[c] = chunk[c].astype("category")
-            frames.append(chunk)
-        return pd.concat(frames, ignore_index=True)
+        with conn.cursor() as cur:
+            cur.execute("SELECT COUNT(*), AVG(churn::int) FROM marts.customer_360")
+            total, churn_rate = cur.fetchone()
+        return {"total_customers": int(total), "churn_rate": float(churn_rate)}
+    finally:
+        conn.close()
+
+
+@st.cache_data(ttl=600)
+def load_segment_rates(column: str) -> pd.DataFrame:
+    """Churn rate by segment, computed as a SQL GROUP BY.
+
+    Postgres aggregates a million rows far more cheaply than shipping them
+    all to pandas to do the same thing, and the result is a handful of rows.
+    """
+    if column not in set(CHURN_CATEGORICAL) | {"total_active_services"}:
+        raise ValueError(f"unexpected segment column {column!r}")  # guards the f-string below
+    conn = get_pg_conn()
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                f"SELECT {column}::text, AVG(churn::int), COUNT(*) "
+                f"FROM marts.customer_360 GROUP BY {column} ORDER BY {column}"
+            )
+            rows = cur.fetchall()
+        return pd.DataFrame(rows, columns=[column, "churn_rate", "n_customers"]).astype(
+            {"churn_rate": float, "n_customers": int}
+        )
+    finally:
+        conn.close()
+
+
+@st.cache_data(ttl=600)
+def load_customers_by_id(customer_ids: tuple[str, ...]) -> pd.DataFrame:
+    """Full rows for just the customers being displayed."""
+    if not customer_ids:
+        return pd.DataFrame(columns=_DASHBOARD_COLUMNS)
+    conn = get_pg_conn()
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                f"SELECT {', '.join(_DASHBOARD_COLUMNS)} FROM marts.customer_360 "
+                f"WHERE customer_id = ANY(%s)",
+                (list(customer_ids),),
+            )
+            rows = cur.fetchall()
+        return pd.DataFrame(rows, columns=_DASHBOARD_COLUMNS)
     finally:
         conn.close()
 
@@ -278,17 +354,6 @@ def load_all_churn_metadata() -> list[dict]:
         except (json.JSONDecodeError, OSError):
             continue
     return records
-
-
-@st.cache_data(ttl=300)
-def score_churn(df: pd.DataFrame, _churn_artifact, churn_version: str) -> pd.Series:
-    if _churn_artifact is None:
-        return pd.Series([None] * len(df), index=df.index)
-    X = df[CHURN_FEATURES].copy()
-    for c in [f for f in CHURN_FEATURES if df[f].dtype == bool]:
-        X[c] = X[c].astype(float)
-    pipeline = _churn_artifact["pipeline"]
-    return pd.Series(pipeline.predict_proba(X)[:, 1], index=df.index)
 
 
 def column_importances(pipeline) -> dict:
@@ -420,7 +485,6 @@ def main():
         unsafe_allow_html=True,
     )
 
-    df = load_customer_360()
     churn_artifact, churn_version = load_latest_artifact("churn_model_*.joblib")
     # Recommender is NOT loaded here: its profile matrix is ~100MB+ resident
     # once loaded, and only the At-Risk Customers view actually calls
@@ -435,23 +499,26 @@ def main():
         st.warning("No churn model artifact found in models_store/. Run `python -m src.model.train_churn` first.")
         return
 
-    # .assign(), not .copy() + column assignment: avoids duplicating all 40
-    # existing columns' worth of data (300K+ rows) just to add one column.
-    df = df.assign(churn_probability=score_churn(df, churn_artifact, churn_version))
+    # Compact per-customer scores only (id, probability, monthly spend) -
+    # never the full mart. See score_all_customers for why.
+    scored = score_all_customers(churn_artifact, churn_version)
     importances = column_importances(churn_artifact["pipeline"])
 
-    at_risk = df[df["churn_probability"] >= threshold].sort_values("churn_probability", ascending=False)
-    revenue_at_risk = at_risk["monthlycharges"].sum()
-    overall_churn_rate = df["churn"].mean()
+    stats = load_overall_stats()
+    at_risk_mask = scored["churn_probability"] >= threshold
+    n_at_risk = int(at_risk_mask.sum())
+    revenue_at_risk = float(scored.loc[at_risk_mask, "monthlycharges"].sum())
+    overall_churn_rate = stats["churn_rate"]
+    total_customers = stats["total_customers"]
     metadata_history = load_all_churn_metadata()
     latest_meta = metadata_history[-1] if metadata_history else None
     latest_auc = latest_meta["roc_auc"] if latest_meta else None
 
     # ---------------------------------------------------------------- KPIs
     k1, k2, k3, k4, k5 = st.columns(5)
-    k1.metric("Total customers", f"{len(df):,}")
+    k1.metric("Total customers", f"{total_customers:,}")
     k2.metric("Historical churn rate", f"{overall_churn_rate:.1%}")
-    k3.metric("At-risk now", f"{len(at_risk):,}", help=f"churn_probability ≥ {threshold:.2f}")
+    k3.metric("At-risk now", f"{n_at_risk:,}", help=f"churn_probability ≥ {threshold:.2f}")
     k4.metric("Monthly revenue at risk", f"${revenue_at_risk:,.0f}", help="Sum of monthlycharges for at-risk customers")
     k5.metric("Model AUC", f"{latest_auc:.3f}" if latest_auc else "n/a", help=f"Model version {churn_version}")
 
@@ -472,26 +539,32 @@ def main():
         section_header("PATTERNS", "Where churn concentrates")
         c1, c2, c3 = st.columns(3)
         with c1:
-            by_contract = df.groupby("contract", observed=True)["churn"].mean().reset_index()
-            by_contract.columns = ["contract", "churn_rate"]
+            by_contract = load_segment_rates("contract")
             fig = px.bar(by_contract, x="contract", y="churn_rate", title="Churn rate by contract type")
             st.plotly_chart(apply_chart_theme(fig), use_container_width=True)
         with c2:
-            by_tenure = df.groupby("tenure_bucket", observed=True)["churn"].mean().reset_index()
-            by_tenure.columns = ["tenure_bucket", "churn_rate"]
+            by_tenure = load_segment_rates("tenure_bucket")
             order = ["new_0_6mo", "established_6_24mo", "loyal_24mo_plus"]
             by_tenure["tenure_bucket"] = pd.Categorical(by_tenure["tenure_bucket"], categories=order, ordered=True)
             by_tenure = by_tenure.sort_values("tenure_bucket")
             fig = px.bar(by_tenure, x="tenure_bucket", y="churn_rate", title="Churn rate by tenure")
             st.plotly_chart(apply_chart_theme(fig), use_container_width=True)
         with c3:
-            by_bundle = df.groupby("total_active_services")["churn"].mean().reset_index()
-            by_bundle.columns = ["total_active_services", "churn_rate"]
+            by_bundle = load_segment_rates("total_active_services")
+            by_bundle["total_active_services"] = by_bundle["total_active_services"].astype(int)
+            by_bundle = by_bundle.sort_values("total_active_services")
             fig = px.bar(by_bundle, x="total_active_services", y="churn_rate", title="Churn rate by service bundle size")
             st.plotly_chart(apply_chart_theme(fig), use_container_width=True)
 
         section_header("EXPOSURE", "Revenue at risk by segment")
-        rev_by_contract = at_risk.groupby("contract", observed=True)["monthlycharges"].sum().reset_index()
+        # Contract for at-risk customers comes from a targeted fetch of the
+        # top slice rather than a full-table join in pandas.
+        top_ids = tuple(scored.loc[at_risk_mask].nlargest(max_rows, "churn_probability")["customer_id"])
+        top_rows = load_customers_by_id(top_ids)
+        rev_by_contract = (
+            top_rows.groupby("contract", observed=True)["monthlycharges"].sum().reset_index()
+            if len(top_rows) else pd.DataFrame({"contract": [], "monthlycharges": []})
+        )
         rev_by_contract.columns = ["contract", "revenue_at_risk"]
         fig = px.bar(
             rev_by_contract.sort_values("revenue_at_risk", ascending=True),
@@ -505,11 +578,18 @@ def main():
         rec_artifact, _ = load_latest_artifact("recommender_*.joblib")
         section_header("ACTION LIST", f"At-risk customers (probability ≥ {threshold:.2f})")
         st.caption(
-            f"{len(at_risk):,} of {len(df):,} customers meet this threshold — showing top {min(max_rows, len(at_risk)):,}, ranked by risk. "
+            f"{n_at_risk:,} of {total_customers:,} customers meet this threshold — showing top {min(max_rows, n_at_risk):,}, ranked by risk. "
             "Risk factors are per-customer SHAP explanations (▲ pushes risk up, ▼ pushes risk down) — what actually drove *this* prediction, not just a global average."
         )
 
-        display_subset = at_risk.head(max_rows)
+        # Only the displayed customers are pulled in full - the streaming
+        # score pass kept just ids/probabilities/spend for everyone else.
+        top_ids = tuple(scored.loc[at_risk_mask].nlargest(max_rows, "churn_probability")["customer_id"])
+        display_subset = load_customers_by_id(top_ids)
+        if len(display_subset):
+            display_subset = display_subset.merge(
+                scored[["customer_id", "churn_probability"]], on="customer_id", how="left"
+            ).sort_values("churn_probability", ascending=False)
         try:
             with st.spinner("Computing per-customer SHAP explanations..."):
                 shap_labels = compute_shap_risk_factors(churn_artifact["pipeline"], display_subset)
@@ -524,11 +604,20 @@ def main():
             action = "-"
             if rec_artifact is not None:
                 try:
-                    recs = recommend_for_customer(rec_artifact, row["customer_id"], top_n=1)
+                    # Profile-based, not id-based: the k-NN index is a
+                    # reference set covering ~154K customers, while
+                    # customer_360 holds 1M. Looking up by id left 84.6% of
+                    # customers with no recommendation at all. Transforming
+                    # this customer's profile and matching it against the
+                    # index serves everyone, at no extra memory cost.
+                    own = [int(row[s]) for s in REC_SERVICE_COLUMNS]
+                    recs = recommend_for_profile(
+                        rec_artifact, row.to_frame().T, own, top_n=1
+                    )
                     if recs:
                         action = f"Offer: {recs[0]['service'].replace('has_', '').replace('_', ' ').title()}"
-                except KeyError:
-                    action = "n/a (not in recommender training set)"
+                except Exception:
+                    action = "-"
             display_rows.append({
                 "customer_id": row["customer_id"],
                 "churn_probability": row["churn_probability"],
@@ -571,8 +660,7 @@ def main():
         rows_of_cols = [st.columns(2), st.columns(2)]
         for (col_name, label), container in zip(seg_cols, [c for row in rows_of_cols for c in row]):
             with container:
-                by_seg = df.groupby(col_name, observed=True)["churn"].mean().reset_index()
-                by_seg.columns = [col_name, "churn_rate"]
+                by_seg = load_segment_rates(col_name)
                 fig = px.bar(
                     by_seg.sort_values("churn_rate", ascending=False),
                     x=col_name, y="churn_rate", title=f"Churn rate by {label.lower()}",

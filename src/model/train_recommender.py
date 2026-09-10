@@ -37,6 +37,8 @@ from sklearn.neighbors import NearestNeighbors
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import OneHotEncoder, StandardScaler
 
+from src.warehouse import stream_query
+
 load_dotenv()
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
@@ -71,25 +73,25 @@ def get_pg_conn():
 
 
 def load_customer_360() -> pd.DataFrame:
-    # Raw psycopg2 connection, not a SQLAlchemy Engine - see the comment in
-    # train_churn.py's load_customer_360 for why.
-    cols = ", ".join([ID_COL] + PROFILE_NUMERIC + PROFILE_CATEGORICAL + SERVICE_COLUMNS)
-    conn = get_pg_conn()
-    try:
-        # Chunked read for the same reason as train_churn.load_customer_360:
-        # a single read_sql spikes memory well above the final DataFrame
-        # while pandas holds the full raw row-tuple form.
-        frames = []
-        for chunk in pd.read_sql(f"SELECT {cols} FROM marts.customer_360", conn, chunksize=25_000):
-            for c in SERVICE_COLUMNS:
-                chunk[c] = chunk[c].astype(int)
-            for c in PROFILE_CATEGORICAL:
-                chunk[c] = chunk[c].astype("category")
-            frames.append(chunk)
-        df = pd.concat(frames, ignore_index=True)
-    finally:
-        conn.close()
-    return df
+    # Server-side cursor via stream_query, NOT pd.read_sql(chunksize=...):
+    # psycopg2's default client-side cursor buffers the whole result set in
+    # libpq first, so read_sql's chunking bounds pandas' peak but not the
+    # process's. At 1M rows that fails outright with "out of memory for
+    # query result". See src/warehouse.py.
+    columns = [ID_COL] + PROFILE_NUMERIC + PROFILE_CATEGORICAL + SERVICE_COLUMNS
+
+    def _downcast(batch: pd.DataFrame) -> pd.DataFrame:
+        for c in SERVICE_COLUMNS:
+            batch[c] = batch[c].astype(int)
+        for c in PROFILE_CATEGORICAL:
+            batch[c] = batch[c].astype("category")
+        return batch
+
+    return stream_query(
+        f"SELECT {', '.join(columns)} FROM marts.customer_360",
+        columns=columns,
+        transform=_downcast,
+    )
 
 
 def build_preprocessor() -> ColumnTransformer:
@@ -115,6 +117,12 @@ def train_and_save() -> dict:
     preprocessor = build_preprocessor()
     X_profile = preprocessor.fit_transform(df[PROFILE_NUMERIC + PROFILE_CATEGORICAL])
     X_profile = np.asarray(X_profile.todense()) if hasattr(X_profile, "todense") else np.asarray(X_profile)
+    # float32, not float64: this matrix is one row per customer and is both
+    # held in memory and serialized into the artifact that the API and
+    # dashboard load. At 1M customers that is ~240MB in float64 versus
+    # ~120MB in float32, and float32 is far more precision than a
+    # nearest-neighbour distance ranking over standardized features needs.
+    X_profile = X_profile.astype(np.float32)
 
     service_matrix = df[SERVICE_COLUMNS].to_numpy()
     customer_ids = df[ID_COL].to_numpy()
@@ -154,10 +162,58 @@ def train_and_save() -> dict:
     return metadata
 
 
+def _rank_unsubscribed(artifact: dict, distances, neighbor_idxs, own_services, top_n: int) -> list[dict]:
+    """Shared ranking step: score each service by how common it is among
+    the given neighbours, then return only the ones this customer lacks."""
+    service_matrix = artifact["service_matrix"]
+    service_columns = artifact["service_columns"]
+    neighbor_services = service_matrix[neighbor_idxs]  # (k, n_services)
+
+    # inverse-distance-weighted subscription rate per service among neighbors
+    weights = 1.0 / (distances + 1e-6)
+    weights = weights / weights.sum()
+    weighted_rate = (neighbor_services * weights[:, None]).sum(axis=0)
+
+    candidates = [
+        {"service": service_columns[i], "score": round(float(weighted_rate[i]), 4)}
+        for i in range(len(service_columns))
+        if own_services[i] == 0
+    ]
+    candidates.sort(key=lambda c: c["score"], reverse=True)
+    return candidates[:top_n]
+
+
+def recommend_for_profile(
+    artifact: dict, profile: pd.DataFrame, own_services, top_n: int = 3
+) -> list[dict]:
+    """Recommend for *any* customer, whether or not they are in the index.
+
+    The fitted k-NN index is a **reference set**, not a registry of every
+    customer: a profile is transformed through the saved preprocessor and
+    matched against it. That decouples coverage from index size - the index
+    can stay small enough to fit in memory (and in the artifact the API and
+    dashboard load) while still serving the entire customer base.
+
+    `profile` is a single-row DataFrame with the PROFILE_NUMERIC and
+    PROFILE_CATEGORICAL columns; `own_services` is that customer's current
+    subscription flags, in SERVICE_COLUMNS order.
+    """
+    preprocessor = artifact["preprocessor"]
+    nn_model: NearestNeighbors = artifact["nn_model"]
+
+    x = preprocessor.transform(profile[artifact["profile_numeric"] + artifact["profile_categorical"]])
+    x = np.asarray(x.todense()) if hasattr(x, "todense") else np.asarray(x)
+    x = x.astype(np.float32)
+
+    distances, neighbor_idxs = nn_model.kneighbors(x)
+    return _rank_unsubscribed(artifact, distances[0], neighbor_idxs[0], np.asarray(own_services), top_n)
+
+
 def recommend_for_customer(artifact: dict, customer_id: str, top_n: int = 3) -> list[dict]:
-    """Given a loaded recommender artifact (see load_latest_recommender in
-    api.py), returns up to top_n un-subscribed services ranked by how
-    common they are among the customer's nearest profile-neighbors."""
+    """Recommend for a customer already present in the index, by id.
+
+    Kept for the id-only API path. For customers outside the reference set,
+    use recommend_for_profile instead."""
     customer_ids = artifact["customer_ids"]
     idx_matches = np.where(customer_ids == customer_id)[0]
     if len(idx_matches) == 0:
@@ -179,20 +235,7 @@ def recommend_for_customer(artifact: dict, customer_id: str, top_n: int = 3) -> 
     distances = distances[mask]
 
     own_services = service_matrix[idx]
-    neighbor_services = service_matrix[neighbor_idxs]  # (k, n_services)
-
-    # inverse-distance-weighted subscription rate per service among neighbors
-    weights = 1.0 / (distances + 1e-6)
-    weights = weights / weights.sum()
-    weighted_rate = (neighbor_services * weights[:, None]).sum(axis=0)
-
-    candidates = [
-        {"service": service_columns[i], "score": round(float(weighted_rate[i]), 4)}
-        for i in range(len(service_columns))
-        if own_services[i] == 0
-    ]
-    candidates.sort(key=lambda c: c["score"], reverse=True)
-    return candidates[:top_n]
+    return _rank_unsubscribed(artifact, distances, neighbor_idxs, own_services, top_n)
 
 
 if __name__ == "__main__":

@@ -6,12 +6,12 @@
 > customers — it describes patterns the data generator produced. Treat this
 > as a demonstration of the analysis method, not a market research report.
 
-**Snapshot as of:** the churn model below was retrained on the **full
-1,000,000-row dataset** (all 13 batches, reconstructed locally while the
-Postgres warehouse was temporarily unavailable — see
-`notebooks/model_dev_offline.py`). `customer_360` in the live warehouse
-will catch up to this row count as the remaining batches are ingested
-through Airflow in the normal course of operation. See the main
+**Snapshot as of:** all **13 batches ingested through the Airflow DAG** —
+`customer_360` now holds the complete **1,000,000 rows** in the live
+warehouse. The statistical analyses below were re-run against that full
+dataset. The production churn model itself is trained on a 150,000-row
+stratified sample of it, a deliberate memory trade-off documented in
+`src/model/train_churn.py` (`MAX_TRAINING_ROWS`). See the main
 [README.md](../README.md) for architecture and verified build state.
 
 ## 1. Class balance (churn label)
@@ -51,28 +51,28 @@ train/test split throughout for a fair comparison:
   rows, needing careful threshold recalibration since SMOTE shifts what
   the raw probability output means). Not adopted.
 
-**Final configuration:** LightGBM, `class_weight="balanced"`, decision
-threshold 0.512 (chosen to guarantee recall ≥ 0.60), trained on the full
-1,000,000-row dataset:
+**Current production model** (version `20260909T163041Z`, retrained
+automatically by the Airflow DAG): LightGBM, `class_weight="balanced"`,
+decision threshold 0.451, trained on a 150,000-row stratified sample:
 
 | Class | Precision | Recall | F1 |
 |---|---|---|---|
-| Retained (0) | 0.94 | 0.66 | 0.78 |
-| Churned (1) | 0.16 | 0.60 | 0.26 |
+| Retained (0) | 0.94 | 0.61 | 0.74 |
+| Churned (1) | 0.15 | 0.60 | 0.23 |
 
-Accuracy 0.66 (uninformative given the imbalance — included only for
-completeness), ROC AUC 0.683.
+ROC AUC 0.652. Accuracy 0.61 is reported only for completeness — it is
+uninformative on a 90/10 split, where predicting "nobody churns" scores 0.90.
 
 **Honest verdict:** nothing tried meaningfully beats the original
-RandomForest baseline (AUC 0.677, F1 0.252 at the default 0.5 threshold).
-LightGBM's edge (AUC 0.683, confirmed by cross-validation) is small,
-real, and adopted — mainly because it also trains ~6x faster. The bigger,
-practically useful change was threshold tuning: recall went from 0.45–0.50
-to a guaranteed 0.60 at the cost of precision dropping to 0.16, a
-deliberate trade-off for a retention use case where missing a churner
-costs more than one extra false-positive outreach. The ~0.68 AUC ceiling
-looks like a genuine property of this synthetic dataset's generated
-signal, not a modeling gap — see the README's Limitations section.
+RandomForest baseline. Observed test AUC across every configuration and
+training size tried lands in a **0.65–0.68** band, with run-to-run
+sampling variance (~0.03) about as large as the differences between
+approaches — so claims of one model "beating" another here should be
+treated cautiously. LightGBM was adopted for a small CV-confirmed edge
+plus ~6x faster training. The practically useful change was threshold
+selection, now derived from expected value rather than a recall heuristic
+(Section 6). This ~0.68 ceiling looks like a genuine property of the
+synthetic data's generated signal, not a modeling gap.
 
 ## 3. Top churn risk factors
 
@@ -113,19 +113,22 @@ be from a bar chart alone.
 **Survival analysis** (Cox Proportional Hazards, modeling time-to-churn
 rather than a binary outcome): confirms the same ranking through an
 entirely different method. `is_month_to_month` carries a hazard ratio of
-**2.86** — a month-to-month customer's instantaneous churn risk is
-essentially triple a longer-contract customer's, at any given tenure.
-`num_complaints` (HR 1.19) and low `customer_satisfaction` (HR 0.90 per
+**2.77** — a month-to-month customer's instantaneous churn risk is
+close to triple a longer-contract customer's, at any given tenure.
+`num_complaints` (HR 1.20) and low `customer_satisfaction` (HR 0.90 per
 point, i.e. protective) are the next-strongest drivers. Model concordance:
-0.62 (0.5 = random ranking, 1.0 = perfect).
+0.617 (0.5 = random ranking, 1.0 = perfect). Kaplan-Meier survival:
+94.7% of customers are still active at 12 months tenure, 90.2% at 24
+months, 82.1% at 48.
 
 **A statistical-significance caution, reported rather than hidden:**
 `monthlycharges` reaches p < 0.05 in both the significance tests and the
-Cox model, but its hazard ratio is ≈0.998 per dollar — a customer would
-need to pay $100/month more just to see their hazard drop ~18%. At
-300K+ rows, statistical significance is easy to reach for practically
-negligible effects; both numbers are reported together specifically so
-this doesn't get miscommunicated as "monthly charges matter."
+Cox model, but its hazard ratio is ≈0.9992 per dollar — a customer would
+need to pay $100/month more just to see their hazard drop ~8%. At
+1,000,000 rows, statistical significance is trivially easy to reach for
+practically negligible effects; both numbers are reported together
+specifically so this doesn't get miscommunicated as "monthly charges
+matter."
 
 **Unsupervised segmentation** (K-means, no churn label involved in forming
 the clusters): finds 4 usable customer segments differing in income,
@@ -178,6 +181,58 @@ and tech support; the model recommended, in order: **streaming TV** (score
 0.457), **device protection** (0.360), **online security** (0.192) — a
 plausible upsell path toward a more "fully bundled" profile matching what
 similar customers in the neighborhood have.
+
+## 6. Turning the score into a decision: expected value
+
+A churn probability is not a decision. Choosing *who to actually contact*
+requires a threshold, and the earlier heuristic ("guarantee recall ≥ 0.60")
+was a judgement call, not an economic one. `notebooks/threshold_and_business_value.ipynb`
+replaces it with a cost/benefit derivation.
+
+**The economics** (illustrative assumptions — this synthetic dataset has no
+campaign-response data, so these would come from finance in reality): a
+retention offer costs **$30**, works **30%** of the time, and a saved
+customer is worth **12 months of their own monthly spend** (~$1,037 on
+average). The asymmetry is what matters: a wasted offer costs tens of
+dollars, a missed churner costs hundreds.
+
+**Results on the 200,000-customer held-out test set:**
+
+| Strategy | Flagged | Recall | Precision | Net value |
+|---|---|---|---|---|
+| Do nothing | 0 | — | — | $0 |
+| Contact everyone | 200,000 | 1.000 | 0.099 | **$89,436** |
+| Naive threshold (0.5) | 63,028 | 0.549 | 0.173 | $1,385,357 |
+| Production threshold (0.451) | 82,336 | 0.649 | 0.156 | $1,409,708 |
+| **EV-optimal (0.470)** | 74,909 | 0.614 | 0.163 | **$1,424,438** |
+
+**The headline is not the threshold — it's the targeting.** Contacting
+everyone returns $89K; any targeted strategy returns ~$1.4M. The model's
+value lies overwhelmingly in *not* wasting offers on the ~90% who were
+never going to leave. The gap between competing thresholds ($1.39M–$1.42M)
+is small next to that.
+
+**A calibration problem worth knowing about.** The break-even *true* churn
+probability is 0.096, but the profit curve peaks at a raw score of 0.470.
+That is not a contradiction — the model is badly miscalibrated by design.
+`class_weight="balanced"` inflates minority-class scores: mean predicted
+score is **0.413** against an actual churn rate of **0.099**, and its Brier
+score (0.196) is *worse* than simply always predicting the base rate
+(0.089). By decile, predicted scores run 3–5x higher than observed churn
+rates. A true probability of ~0.096 maps to a predicted score of ~0.448 —
+which is why the empirical optimum lands at 0.470. Theory and practice
+agree once miscalibration is accounted for.
+
+The practical consequence: **never present these scores to a stakeholder as
+literal probabilities.** A score of 0.6 means roughly a 16% real churn
+rate, not 60%. The ranking is sound (the calibration curve is monotonic,
+which is why AUC looks reasonable while Brier does not), so thresholding
+works — but the numbers themselves are not probabilities.
+
+**Robustness:** across a sweep of offer costs ($10–$120) and success rates
+(10%–50%), the optimal threshold stays within a fairly narrow band and the
+campaign remains profitable in nearly all combinations — so the
+recommendation does not hinge on getting the cost assumptions exactly right.
 
 ## Limitations
 

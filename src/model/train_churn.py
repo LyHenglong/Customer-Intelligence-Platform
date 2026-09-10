@@ -55,10 +55,14 @@ TARGET_RECALL = 0.60
 # inside an Airflow worker on an 8GB host (see README's RAM constraint) and
 # was OOM-killed at ~460K rows before this cap existed.
 #
-# The cost of capping is close to zero here: measured AUC across training
-# sizes was 0.677 @ 154K rows, 0.663 @ 231K, 0.683 @ 1M - i.e. flat within
-# noise. Rows beyond ~150K buy no measurable accuracy on this dataset, so
-# bounding memory is free. Raise it (or set it to None) on a larger machine.
+# The cost of capping is small but not quite zero. Measured test AUC across
+# training sizes: 0.652 and 0.677 @ ~150K rows (two different samples),
+# 0.663 @ 231K, 0.683 @ 1M. There is no clean monotonic trend - run-to-run
+# sampling variance (~0.03) is comparable to the spread across sizes - but
+# the largest run did produce the best number, so capping likely costs a
+# little accuracy at the top end. That trade is taken deliberately: an
+# OOM-killed retrain task breaks the pipeline, a 0.02 AUC difference on
+# synthetic data does not. Raise it (or set it to None) on a larger machine.
 #
 # Sized against the real constraint, which is not the container's mem_limit
 # but Docker Desktop's WSL2 VM: 3.8GB total for every container combined,

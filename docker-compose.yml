@@ -155,6 +155,10 @@ services:
     depends_on:
       - postgres
     profiles: ["serving"]
+    # Scoring 1,000,000 customers needs real headroom even after the
+    # streaming redesign (see score_all_customers). On this 3.8GB Docker VM
+    # that means not running orchestration and serving flat out at the same
+    # time - stop airflow-* while using the dashboard, or vice versa.
     # 400m (later 768m) was OOM-killed (exit 137) under a real browser
     # session - Streamlit's full session/WebSocket state plus rendering 3
     # plotly charts uses meaningfully more memory than a headless one-shot
@@ -163,7 +167,7 @@ services:
     # this limit is a safety margin on top of those fixes, not a
     # replacement for them - the host itself is memory-constrained (see
     # README's RAM rationale), so it isn't raised further than this.
-    mem_limit: 1024m
+    mem_limit: 2048m
 
 volumes:
   pgdata:
