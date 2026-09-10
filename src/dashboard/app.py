@@ -505,12 +505,32 @@ def apply_chart_theme(fig, height: int = 320):
 def main():
     st.markdown(_CUSTOM_CSS, unsafe_allow_html=True)
 
+    # Loaded before the sidebar because the at-risk slider defaults to this
+    # model's own decision threshold (@st.cache_resource, so this costs
+    # nothing after the first run).
+    churn_artifact, churn_version = load_latest_artifact("churn_model_*.joblib")
+
     with st.sidebar:
         st.markdown("### Retention Command Center")
         st.caption("Telecom Customer Churn & Recommendation Platform")
         st.divider()
         st.markdown("**Filters**")
-        threshold = st.slider("At-risk threshold (churn probability)", 0.0, 1.0, 0.5, 0.05)
+        # Default to the model's own trained threshold, not a hardcoded 0.5.
+        # The model now emits *calibrated* probabilities, so its operating
+        # point sits near the ~10% base rate (~0.11), not near 0.5 - leaving
+        # the old 0.5 default here would have shown an almost-empty at-risk
+        # list and made the model look broken. Step is fine-grained for the
+        # same reason: at this scale 0.05 steps are far too coarse.
+        model_threshold = float(churn_artifact.get("threshold", 0.5)) if churn_artifact else 0.5
+        threshold = st.slider(
+            "At-risk threshold (churn probability)",
+            0.0, 1.0, round(model_threshold, 3), 0.005,
+            help=(
+                f"Defaults to the deployed model's decision threshold ({model_threshold:.3f}), "
+                "chosen at training time to guarantee recall >= 0.60. Scores are calibrated, "
+                "so this is a real probability."
+            ),
+        )
         max_rows = st.slider("Max at-risk customers to display", 10, 500, 100, 10)
         st.divider()
         st.caption(f"Refreshed {datetime.now(timezone.utc).strftime('%H:%M:%S UTC')}")
@@ -524,7 +544,6 @@ def main():
         unsafe_allow_html=True,
     )
 
-    churn_artifact, churn_version = load_latest_artifact("churn_model_*.joblib")
     # Recommender is NOT loaded here: its profile matrix is ~100MB+ resident
     # once loaded, and only the At-Risk Customers view actually calls
     # recommend_for_customer(). Loading it unconditionally meant every view
@@ -541,7 +560,14 @@ def main():
     # Compact per-customer scores only (id, probability, monthly spend) -
     # never the full mart. See score_all_customers for why.
     scored = score_all_customers(churn_artifact, churn_version)
-    importances = column_importances(churn_artifact["pipeline"])
+    # Explainability tooling (feature importances, SHAP) needs the raw
+    # sklearn Pipeline, not the CalibratedClassifierCV wrapper stored under
+    # "pipeline" for serving - the wrapper has no .named_steps. Artifacts
+    # trained before calibration was added have no "base_pipeline" key, in
+    # which case "pipeline" already IS the raw Pipeline, so this falls back
+    # to it correctly either way.
+    explain_pipeline = churn_artifact.get("base_pipeline", churn_artifact["pipeline"])
+    importances = column_importances(explain_pipeline)
 
     stats = load_overall_stats()
     at_risk_mask = scored["churn_probability"] >= threshold
@@ -639,7 +665,10 @@ def main():
             ).sort_values("churn_probability", ascending=False)
         try:
             with st.spinner("Computing per-customer SHAP explanations..."):
-                shap_labels = compute_shap_risk_factors(churn_artifact["pipeline"], display_subset)
+                # See explain_pipeline note above: TreeExplainer needs the
+                # raw LightGBM pipeline, not the CalibratedClassifierCV
+                # wrapper used for serving.
+                shap_labels = compute_shap_risk_factors(explain_pipeline, display_subset)
         except Exception:
             # Falls back to the global-importance heuristic if SHAP fails
             # for any reason (e.g. a future model type TreeExplainer

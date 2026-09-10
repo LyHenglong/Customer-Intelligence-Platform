@@ -118,20 +118,23 @@ def optimal_threshold(
     The break-even intuition: it is worth contacting a customer when
     p_churn * p_offer_success * value > offer_cost, i.e. a *true* churn
     probability above offer_cost / (p_offer_success * value). With the
-    default assumptions and a ~$90/mo customer that is
-    30 / (0.30 * 1080) ~= 0.09.
+    default assumptions and a ~$86/mo customer that is
+    30 / (0.30 * 1035) ~= 0.0966.
 
-    That 0.09 is NOT the threshold to apply to this model's raw output.
-    The churn model is trained with class_weight="balanced", which
-    deliberately inflates minority-class scores: its mean predicted score
-    is ~0.43 against an actual churn rate of ~0.099, and a predicted score
-    of ~0.50 corresponds to a true probability of ~0.10 (see the
-    calibration analysis in notebooks/threshold_and_business_value.ipynb).
-    So the empirically-optimal threshold on raw scores lands near 0.48 -
-    which is the 0.09 break-even, mapped through the model's
-    miscalibration. Searching the profit curve empirically, as this
-    function does, is correct either way; calibrating the model first
-    would be the alternative route to the same decision.
+    Since the churn model is now calibrated (sigmoid, on a held-out split -
+    see train_churn.py), that break-even applies *directly* to its output.
+    Measured on the test set: theory says 0.0966, the empirical profit peak
+    is 0.1000, a gap of 0.0034 that is grid resolution rather than
+    disagreement.
+
+    This was not always true, and the history is worth keeping. Before
+    calibration, class_weight="balanced" inflated the model's scores to a
+    mean of ~0.41 against an actual churn rate of ~0.10, so the empirical
+    peak sat near 0.47 - the same 0.0966 break-even, seen through the
+    model's miscalibration. The empirical search this function performs was
+    correct either way, which is precisely why it is done empirically; what
+    calibration bought is that the theoretical number is now directly
+    usable and the two agree.
     """
     curve = profit_curve(y_true, y_proba, values, offer_cost=offer_cost, p_offer_success=p_offer_success)
     best_idx = int(curve["net_value"].idxmax())

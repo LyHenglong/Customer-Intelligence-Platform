@@ -52,17 +52,25 @@ train/test split throughout for a fair comparison:
   rows, needing careful threshold recalibration since SMOTE shifts what
   the raw probability output means). Not adopted.
 
-**Current production model** (version `20260909T163041Z`, retrained
+**Current production model** (version `20260910T121802Z`, retrained
 automatically by the Airflow DAG): LightGBM, `class_weight="balanced"`,
-decision threshold 0.451, trained on a 150,000-row stratified sample:
+**sigmoid-calibrated** on a held-out split, decision threshold 0.105,
+trained on a 150,000-row stratified sample:
 
 | Class | Precision | Recall | F1 |
 |---|---|---|---|
-| Retained (0) | 0.94 | 0.61 | 0.74 |
-| Churned (1) | 0.15 | 0.60 | 0.23 |
+| Retained (0) | 0.94 | 0.65 | 0.77 |
+| Churned (1) | 0.16 | 0.60 | 0.25 |
 
-ROC AUC 0.652. Accuracy 0.61 is reported only for completeness — it is
+ROC AUC 0.669. Accuracy 0.64 is reported only for completeness — it is
 uninformative on a 90/10 split, where predicting "nobody churns" scores 0.90.
+
+The threshold moved from 0.451 to 0.105 between this version and the one
+reported earlier in this document, and the model itself did not get worse
+— precision and recall at the operating point are essentially unchanged.
+What changed is that the raw scores are now calibrated probabilities
+rather than inflated ones, so the *same* decision now sits near the ~10%
+base rate instead of near 0.5. See Section 6 for the full before/after.
 
 **Honest verdict:** nothing tried meaningfully beats the original
 RandomForest baseline. Observed test AUC across every configuration and
@@ -70,10 +78,11 @@ training size tried lands in a **0.65–0.68** band, with run-to-run
 sampling variance (~0.03) about as large as the differences between
 approaches — so claims of one model "beating" another here should be
 treated cautiously. LightGBM was adopted for a small CV-confirmed edge
-plus ~6x faster training. The practically useful change was threshold
-selection, now derived from expected value rather than a recall heuristic
-(Section 6). This ~0.68 ceiling looks like a genuine property of the
-synthetic data's generated signal, not a modeling gap.
+plus ~6x faster training. The practically useful changes were threshold
+selection, now derived from expected value rather than a recall heuristic,
+and probability calibration, which makes the scores themselves trustworthy
+(both in Section 6). This ~0.68 ceiling looks like a genuine property of
+the synthetic data's generated signal, not a modeling gap.
 
 ## 3. Top churn risk factors
 
@@ -200,6 +209,50 @@ and tech support; the model recommended, in order: **streaming TV** (score
 plausible upsell path toward a more "fully bundled" profile matching what
 similar customers in the neighborhood have.
 
+### 5a. Is it actually better than not personalizing at all?
+
+A single plausible-looking example is not an evaluation, and until now the
+recommender had none - every other model in this project is measured
+against a baseline and a held-out split; the recommender's metadata
+recorded only structural facts (profile count, neighbor count). That gap
+is closed by `src/model/evaluate_recommender.py`, a leave-one-out protocol:
+hide one service a customer genuinely owns, present them to the model as
+if they didn't own it, and check where the hidden service lands in the
+ranking of everything else they don't own. Three rankers are scored on
+identical splits - the production k-NN model, a **popularity** baseline
+(rank by how common each service is overall), and a **random** floor -
+over 4,918 evaluation customers **held out of the reference set entirely**
+(scoring the model on profiles it was fitted on would measure memorization,
+not generalization).
+
+| Ranker | Hit@1 | Hit@2 | Hit@3 | MRR |
+|---|---|---|---|---|
+| k-NN (production) | 0.519 | 0.737 | 0.878 | 0.703 |
+| Popularity baseline | 0.483 | 0.732 | 0.891 | 0.686 |
+| Random | 0.245 | 0.478 | 0.681 | 0.498 |
+
+**The honest result: k-NN beats popularity, but the margin is small, and
+popularity is a genuinely hard baseline to clear here.** Both are far
+ahead of random - recommending *something* sensible in this domain isn't
+hard, because 8 services with skewed adoption rates (internet 84.8%,
+phone 76.9%, ... device protection 29.6%) leaves little room for a naive
+ranker to be *bad*. The interesting question is whether personalizing on
+top of that popularity signal earns its complexity.
+
+It does, but modestly, and the honest evidence required a significance
+test rather than eyeballing the table above - a table alone cannot say
+whether +2.5% MRR is signal or five thousand customers' worth of noise.
+Both checks say it's real: a paired bootstrap (2,000 resamples,
+customer-level, since both rankers are scored on the same customers) puts
+the MRR gap at **+0.0170, 95% CI [+0.0105, +0.0237]** - entirely above
+zero. An exact McNemar test on Hit@1 (knn-only hits: 525, popularity-only
+hits: 348) gives **p = 2.3x10^-9**. Both tests answer the same question
+from different angles - "is this real" (McNemar) and "how big is it"
+(bootstrap) - and agree: k-NN's edge over popularity is real, not sampling
+noise, but it is a small edge, not a transformative one. Reported plainly
+rather than rounding "statistically significant" up to "big" or down to
+"doesn't matter."
+
 ## 6. Turning the score into a decision: expected value
 
 A churn probability is not a decision. Choosing *who to actually contact*
@@ -210,7 +263,7 @@ replaces it with a cost/benefit derivation.
 **The economics** (illustrative assumptions — this synthetic dataset has no
 campaign-response data, so these would come from finance in reality): a
 retention offer costs **$30**, works **30%** of the time, and a saved
-customer is worth **12 months of their own monthly spend** (~$1,037 on
+customer is worth **12 months of their own monthly spend** (~$1,036 on
 average). The asymmetry is what matters: a wasted offer costs tens of
 dollars, a missed churner costs hundreds.
 
@@ -219,38 +272,72 @@ dollars, a missed churner costs hundreds.
 | Strategy | Flagged | Recall | Precision | Net value |
 |---|---|---|---|---|
 | Do nothing | 0 | — | — | $0 |
-| Contact everyone | 200,000 | 1.000 | 0.099 | **$89,436** |
-| Naive threshold (0.5) | 63,028 | 0.549 | 0.173 | $1,385,357 |
-| Production threshold (0.451) | 82,336 | 0.649 | 0.156 | $1,409,708 |
-| **EV-optimal (0.470)** | 74,909 | 0.614 | 0.163 | **$1,424,438** |
+| Contact everyone | 200,000 | 1.000 | 0.099 | **$88,637** |
+| Naive threshold (0.5) | 0 | 0.000 | — | $0 |
+| Production threshold (0.105) | 75,182 | 0.616 | 0.163 | $1,419,012 |
+| **EV-optimal (0.110)** | 69,980 | 0.588 | 0.167 | **$1,408,304** |
 
-**The headline is not the threshold — it's the targeting.** Contacting
-everyone returns $89K; any targeted strategy returns ~$1.4M. The model's
-value lies overwhelmingly in *not* wasting offers on the ~90% who were
-never going to leave. The gap between competing thresholds ($1.39M–$1.42M)
-is small next to that.
+**The headline is unchanged: it's the targeting, not the threshold.**
+Contacting everyone returns $89K; any sensibly-targeted strategy returns
+~$1.4M. The gap between the production and EV-optimal thresholds
+($1.408M–$1.419M) is small next to that, and, notably, the production
+threshold edges out the EV-optimal one here — a reminder that
+`optimal_threshold` searches over the discrete set of scores the model
+actually produced, so its "optimum" can land a hair off the analytic peak.
+A 0.75% difference on a $1.4M base is not a finding worth chasing further.
 
-**A calibration problem worth knowing about.** The break-even *true* churn
-probability is 0.096, but the profit curve peaks at a raw score of 0.470.
-That is not a contradiction — the model is badly miscalibrated by design.
-`class_weight="balanced"` inflates minority-class scores: mean predicted
-score is **0.413** against an actual churn rate of **0.099**, and its Brier
-score (0.196) is *worse* than simply always predicting the base rate
-(0.089). By decile, predicted scores run 3–5x higher than observed churn
-rates. A true probability of ~0.096 maps to a predicted score of ~0.448 —
-which is why the empirical optimum lands at 0.470. Theory and practice
-agree once miscalibration is accounted for.
+**A dramatic change from the previous version of this analysis: "naive
+threshold 0.5" now flags nobody at all.** That is not a bug — it's what a
+calibrated model looks like on a ~10%-imbalanced target. When the raw
+scores were inflated by `class_weight="balanced"` (mean predicted score
+0.41 against a 9.9% actual rate), enough customers cleared 0.5 to make that
+threshold look almost reasonable by accident. A calibrated model reports
+real probabilities, and for most customers the real probability of
+churning is nowhere near 50% — so a threshold copied from a balanced
+classification tutorial silently does nothing here. This is exactly the
+failure mode calibration and business-threshold selection exist to catch
+before it reaches production.
 
-The practical consequence: **never present these scores to a stakeholder as
-literal probabilities.** A score of 0.6 means roughly a 16% real churn
-rate, not 60%. The ranking is sound (the calibration curve is monotonic,
-which is why AUC looks reasonable while Brier does not), so thresholding
-works — but the numbers themselves are not probabilities.
+**The model is now calibrated, and the old miscalibration write-up below
+is kept as before/after context rather than deleted, since the fix and
+its motivation are part of the finding.**
 
-**Robustness:** across a sweep of offer costs ($10–$120) and success rates
-(10%–50%), the optimal threshold stays within a fairly narrow band and the
-campaign remains profitable in nearly all combinations — so the
-recommendation does not hinge on getting the cost assumptions exactly right.
+*Before calibration:* the break-even *true* churn probability was 0.096,
+but the profit curve peaked at a raw score of 0.470 — not a contradiction,
+but `class_weight="balanced"` inflating minority-class scores (mean
+predicted 0.413 vs actual 0.099) badly enough that the model's own Brier
+score (0.196) was *worse* than just predicting the base rate every time
+(0.089). Per-decile, predicted scores ran 3–5x higher than observed churn
+rates.
+
+*After calibration* (sigmoid/Platt scaling on a held-out split — see
+`src/model/train_churn.py`): Brier score **0.0854**, finally *beating* the
+always-base-rate baseline (0.0894) rather than losing to it. Mean predicted
+probability **0.100** against an actual rate of **0.099** — no longer 4x
+off, but matching almost exactly. The theoretical break-even (0.0965) and
+the empirical profit-maximizing threshold (0.110) now sit **0.0135 apart**
+instead of 0.096 vs 0.470 — close enough that either could be used directly
+as the operating threshold, which was never true of the raw scores.
+Calibration cost nothing on ranking quality (AUC 0.6693 either way, since
+sigmoid scaling is monotonic) and the operating point at the chosen
+threshold is unchanged (precision 0.160, recall 0.600) — only the number's
+*meaning* changed, from an arbitrary score to a real probability.
+
+The practical consequence, updated: **these scores can now be presented to
+a stakeholder as real probabilities.** A calibrated score of 0.30 means
+roughly a 30% real churn rate, not "somewhere between 6% and 30% depending
+on which decile you're in." That upgrade — not the small AUC number itself
+— is the more consequential outcome of this section.
+
+**Robustness**, re-verified on the calibrated model across the same sweep
+of offer costs ($10–$120) and success rates (10%–50%): all 12 combinations
+remain profitable. The optimal threshold now ranges more widely (0.01–0.41)
+than it did pre-calibration, which is the correct behavior, not a
+regression — thresholds on calibrated probabilities should move with the
+economics across that much wider a range of assumptions, whereas the old
+compressed near-0.4–0.5 thresholds were an artifact of the scores all being
+compressed into that same narrow band regardless of the underlying
+economics.
 
 ## 7. Data drift monitoring
 
