@@ -2,8 +2,10 @@
 FastAPI serving layer for the churn classifier and content-based
 recommender. Loads the latest versioned artifact of each model at startup
 (by filename timestamp - see train_churn.py / train_recommender.py) and
-serves entirely from those in-memory artifacts, no live database
-dependency at request time.
+serves from those in-memory artifacts. Churn predictions and recommender
+index hits need no database at all; /recommend falls back to a single
+warehouse lookup only when a customer isn't in the recommender's bounded
+reference set (see the endpoint for why that is the common case).
 
 Run locally:
     uvicorn src.model.api:app --reload
@@ -28,7 +30,11 @@ from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, Field
 
 from src.model.train_churn import ALL_FEATURES as CHURN_FEATURES
-from src.model.train_recommender import recommend_for_customer
+from src.warehouse import get_pg_conn
+from src.model.train_recommender import recommend_for_customer, recommend_for_profile
+from src.model.train_recommender import PROFILE_NUMERIC as REC_PROFILE_NUMERIC
+from src.model.train_recommender import PROFILE_CATEGORICAL as REC_PROFILE_CATEGORICAL
+from src.model.train_recommender import SERVICE_COLUMNS as REC_SERVICE_COLUMNS
 
 os.environ.setdefault("LOKY_MAX_CPU_COUNT", str(os.cpu_count() or 4))
 
@@ -169,15 +175,61 @@ def predict_churn(req: ChurnRequest):
     )
 
 
+def _fetch_profile_from_warehouse(customer_id: str):
+    """Pulls one customer's profile + current subscriptions from the mart.
+
+    Only called on an index miss (see /recommend). Keeping this off the hot
+    path preserves the "no DB dependency at request time" property for the
+    common case, while still letting the endpoint answer for customers the
+    recommender's reference set doesn't happen to contain.
+    """
+    columns = REC_PROFILE_NUMERIC + REC_PROFILE_CATEGORICAL + REC_SERVICE_COLUMNS
+    conn = get_pg_conn()
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                f"SELECT {', '.join(columns)} FROM marts.customer_360 WHERE customer_id = %s",
+                (customer_id,),
+            )
+            row = cur.fetchone()
+    finally:
+        conn.close()
+
+    if row is None:
+        return None, None
+    profile = pd.DataFrame([row], columns=columns)
+    own_services = [int(profile[s].iloc[0]) for s in REC_SERVICE_COLUMNS]
+    return profile, own_services
+
+
 @app.post("/recommend", response_model=RecommendResponse)
 def recommend(req: RecommendRequest):
     if _state["recommender"] is None:
         raise HTTPException(status_code=503, detail="Recommender not loaded")
 
+    artifact = _state["recommender"]
     try:
-        recs = recommend_for_customer(_state["recommender"], req.customer_id, top_n=req.top_n)
-    except KeyError as e:
-        raise HTTPException(status_code=404, detail=str(e))
+        # Fast path: customer is in the k-NN reference set, answered purely
+        # from the in-memory artifact.
+        recs = recommend_for_customer(artifact, req.customer_id, top_n=req.top_n)
+    except KeyError:
+        # Miss. The reference set is deliberately bounded (~154K customers)
+        # while the warehouse holds 1M, so this is the *common* case, not an
+        # edge case - answering it with a 404 left ~85% of customers with no
+        # recommendation at all. Look the profile up and match it against
+        # the index instead.
+        try:
+            profile, own_services = _fetch_profile_from_warehouse(req.customer_id)
+        except Exception as exc:
+            raise HTTPException(
+                status_code=503,
+                detail=f"customer not in recommender index and warehouse lookup failed: {exc}",
+            )
+        if profile is None:
+            raise HTTPException(
+                status_code=404, detail=f"customer_id {req.customer_id!r} not found"
+            )
+        recs = recommend_for_profile(artifact, profile, own_services, top_n=req.top_n)
 
     return RecommendResponse(
         customer_id=req.customer_id,
