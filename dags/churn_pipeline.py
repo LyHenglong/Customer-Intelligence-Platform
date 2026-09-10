@@ -144,6 +144,25 @@ def churn_pipeline():
         log.info("Retrained churn model: version=%s f1_churn=%.4f", metadata["version"], metadata["f1_churn"])
         return metadata
 
+    @task
+    def retrain_recommender() -> dict:
+        """Rebuilds the recommender's k-NN reference set on the same trigger
+        as the churn model.
+
+        Retraining these together is deliberate: the recommender's reference
+        set is a snapshot of customer_360, so leaving it out meant it aged
+        indefinitely while the churn model refreshed - the recommender
+        artifact was 9 hours older than the churn artifact and built from
+        2 batches' worth of customers rather than 13."""
+        from src.model.train_recommender import train_and_save
+
+        metadata = train_and_save()
+        log.info(
+            "Retrained recommender: version=%s reference_profiles=%d",
+            metadata["version"], metadata["n_customers"],
+        )
+        return metadata
+
     skip_retrain = EmptyOperator(task_id="skip_retrain")
 
     pipeline_done = EmptyOperator(task_id="pipeline_done", trigger_rule=TriggerRule.NONE_FAILED_MIN_ONE_SUCCESS)
@@ -155,7 +174,10 @@ def churn_pipeline():
     branch = check_retrain_needed(drift_summary)
 
     ingested_batch >> dbt_run >> dbt_test >> drift_summary >> branch
-    branch >> retrain_churn_model() >> pipeline_done
+    # Sequential, not parallel: both retrains run in-process under
+    # LocalExecutor on a 3.8GB VM, and running them concurrently is what
+    # the memory ceiling cannot absorb (see docker-compose mem_limit notes).
+    branch >> retrain_churn_model() >> retrain_recommender() >> pipeline_done
     branch >> skip_retrain >> pipeline_done
 
 

@@ -71,9 +71,10 @@ Kaggle CSV (1,000,000 rows, synthetic)
         ├─ detect_feature_drift ► PSI vs the baseline batch across 19
         │                         features ──► public.feature_drift
         │
-        └─ check_retrain_needed ─┬─► retrain_churn_model (every 3rd batch OR
-                                  │    any feature PSI ≥ 0.25; versioned
-                                  │    artifact, never overwritten)
+        └─ check_retrain_needed ─┬─► retrain_churn_model ──► retrain_recommender
+                                  │    (every 3rd batch OR any feature
+                                  │     PSI ≥ 0.25; both models versioned
+                                  │     together, never overwritten)
                                   └─► skip_retrain (otherwise)
 
 customer_360 (one row per customer: demographics, account, services,
@@ -150,7 +151,8 @@ customer_360 (one row per customer: demographics, account, services,
 │   └── init-multi-db.sh
 ├── docker-compose.yml
 ├── .github/workflows/ci.yml
-├── requirements.txt
+├── requirements.txt                # pipeline + serving + CI
+├── requirements-notebooks.txt      # analysis-only extras (see Statistical & analytical depth)
 ├── pytest.ini
 ├── .env.example
 └── .gitignore
@@ -192,6 +194,17 @@ Beyond the production pipeline, `notebooks/eda_and_statistical_analysis.ipynb` i
 - **Survival analysis**: Kaplan-Meier curves (overall and by contract type) and a Cox Proportional Hazards model — modeling *time to churn* directly, which the binary classifier discards. `is_month_to_month` carries a hazard ratio of ~2.77 (holding other factors constant); concordance index 0.617. Kaplan-Meier: 94.7% of customers still active at 12 months tenure, 90.2% at 24, 82.1% at 48.
 - **Unsupervised customer segmentation**: K-means clustering on profile features (age, income, tenure, charges, satisfaction, usage, service count), with an elbow/silhouette analysis to choose k and a PCA projection to visualize it. Reported honestly: silhouette scores are modest (~0.14–0.16), meaning the natural cluster structure is soft, not sharply separated — stated plainly rather than overclaimed.
 - **SHAP explainability**: TreeExplainer on the production LightGBM model, both as a global summary plot and individual waterfall plots for specific high-risk and low-risk customers. This same SHAP logic is also used live in the **dashboard's At-Risk Customers view** (`compute_shap_risk_factors` in `src/dashboard/app.py`) — replacing an earlier global-feature-importance heuristic with real per-customer explanations (bounded to the displayed rows, not the full 1M-row table, for memory reasons).
+
+### Re-running the analysis
+
+The notebooks need libraries the pipeline itself doesn't (statsmodels, lifelines, xgboost, imbalanced-learn, matplotlib, seaborn). Those live in a **separate** requirements file, deliberately: `requirements.txt` is installed into the API image, the dashboard image, and every CI run, none of which import any of them.
+
+```bash
+pip install -r requirements.txt -r requirements-notebooks.txt
+jupyter lab notebooks/
+```
+
+Versions there are pinned to the ones the committed outputs were produced with, so a re-run reproduces the numbers in `report/findings.md` rather than approximately reproducing them.
 
 See the notebook itself for full output, and `report/findings.md` for the business-facing summary of these findings.
 
@@ -332,11 +345,12 @@ Everything below was actually run and checked during the build, not just written
   | **Deployed artifact** (`20260909T163041Z`) | 150,000 | **0.652** | what actually serves predictions |
 
   The deployed model trains on a 150,000-row sample because the retrain task runs in-process under Airflow's LocalExecutor on a 3.8GB Docker VM and was SIGKILLed at full scale (see Deviations); AUC was measured to be flat at 0.652–0.683 across sample sizes, so the cap costs little. Its full test-set metrics: precision 0.146, recall 0.600, F1 0.235, threshold 0.451. See "Limitations" and `report/findings.md` — this is still a modest model, and that's discussed honestly, not hidden.
-- **Recommender**: trains in ~3 seconds at this scale; spot-checked recommendations are sane (only recommends services the customer doesn't already have, ranked by neighbor popularity).
+- **Recommender**: spot-checked recommendations are sane (only ever recommends services the customer doesn't already have, ranked by neighbour popularity). It is now retrained by the DAG on the same trigger as the churn model — previously it wasn't retrained at all, so its artifact had aged 9 hours behind the churn model and was still built from 2 batches' worth of customers rather than 13. Retraining at the full 1,000,000-row scale was verified inside the `airflow-scheduler` container: it samples a bounded 150,000-profile reference set, produces a **9.9MB** artifact (down from 17MB), and the API loads it at **206MB of its 400MB limit** with `/recommend` coverage still 40/40 on random real customers.
 - **FastAPI**: both endpoints tested with a real customer's data pulled from the warehouse. `/recommend` coverage was re-verified after the warehouse-fallback fix on 40 randomly sampled real customer IDs — 40/40 returned recommendations, against ~15% before the fix — while an ID that genuinely doesn't exist still returns 404 and the container stayed at 258MB of its 400MB limit. `/predict-churn` returned a probability consistent with that customer's actual (held-out) label; `/recommend` returned 3 ranked un-subscribed services; a 404 for an unknown `customer_id` was also verified. Re-tested after the DAG's auto-retrain to confirm the API correctly picks up and serves the newest versioned artifact — this is also what surfaced the `dill` cross-environment issue above.
 - **Streamlit dashboard**: verified headlessly via Streamlit's `AppTest` runner *and* by driving the running container with headless Chromium, capturing all five views (the screenshots in this README are those captures). The browser pass found two layout defects `AppTest` structurally could not — a KPI truncated to `$26,051...` and a clipped SHAP column — both since fixed. Peak container memory during a full five-view capture: 652MB against its 2GB limit.
 - **pytest**: 38/38 pass locally, and the same `pytest tests/` command is green on GitHub Actions — most recently on commit `c56ca70`, the commit that added the 18 drift tests, with the dependency-install step (lightgbm, shap, dill) succeeding on a clean Ubuntu runner. Covers ingestion logic, expected-value/threshold math, recommender invariants, and PSI drift.
 - **Drift detection**: computed for all 12 non-baseline batches against the `batch_001` baseline, both from the host and from inside the `airflow-scheduler` container (proving the DAG runtime can actually execute it). Maximum PSI observed across every feature and every batch pair: **0.0006** — a correct negative result on a pre-shuffled source file, not a silent failure. The 18 tests in `tests/test_drift.py` inject genuine shifts and confirm the detector fires on them.
+- **The drift task was verified in a real DAG run**, not just by parsing. `batch_013` was removed from `ingestion_log`/`customers_cleaned`/`raw_customers` and re-ingested through a live triggered run: all 8 tasks succeeded in 97 seconds, and the branch logged its decision from both inputs — `batches: 13 (every 3 -> due=False); drift: max PSI 0.0003 -> detected=False` → `Branch into skip_retrain`, correctly skipping the retrain. Warehouse verified back at 1,000,000 rows afterwards.
 - **Airflow — fully verified end-to-end**, not just built. Two full DAG runs against the live webserver + scheduler (not `airflow tasks test` shortcuts): run 1 ingested `batch_003` and correctly triggered `retrain_churn_model` (3rd batch landed → branch fired, produced a new versioned artifact alongside the original, neither overwritten); run 2 ingested `batch_004` and correctly took the `skip_retrain` branch instead (4th batch, not a multiple of 3). All 7 tasks in both runs ended in `success` (or the intentionally-`skipped` branch). `customer_360` grew exactly as expected across both runs, confirmed by direct row-count query, not just DAG "green" status.
 
 ## Deviations from the original spec, and why
