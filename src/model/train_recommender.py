@@ -58,6 +58,15 @@ SERVICE_COLUMNS = [
     "has_streaming_tv", "has_streaming_movies",
 ]
 
+
+def service_display_name(service_column: str) -> str:
+    """'has_streaming_tv' -> 'Streaming Tv'. The single place this
+    conversion happens - the dashboard's action-list column and the AI
+    outreach agent's prompt both call this, rather than each having their
+    own copy of the same replace/title() chain."""
+    return service_column.replace("has_", "").replace("_", " ").title()
+
+
 ID_COL = "customer_id"
 N_NEIGHBORS = 20
 

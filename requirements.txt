@@ -41,6 +41,12 @@ plotly==5.24.1
 # subset - never the full customer_360 table.
 shap==0.46.0
 
+# AI Agent Layer (src/agents/): explains SHAP output in plain English,
+# drafts retention outreach, and summarizes retrains - a presentation
+# layer over the ML output above, never a second modeling step. OpenAI-
+# compatible client, pointed at Groq's API (fast, generous free tier).
+groq==1.7.0
+
 # Orchestration client (kaggle download + env)
 kaggle==1.6.17
 python-dotenv==1.0.1

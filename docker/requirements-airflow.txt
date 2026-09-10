@@ -24,3 +24,7 @@ python-dotenv==1.0.1
 # and one trained/loaded elsewhere (API, dashboard, local scripts, which
 # also pin this exact version in requirements.txt) stay pickle-compatible.
 dill==0.3.1.1
+# AI Agent Layer (src/agents/): the retrain-summary agent runs as a DAG
+# task (summarize_retrain), so the scheduler needs this even though it
+# doesn't need shap (that's dashboard/API only, for per-customer SHAP).
+groq==1.7.0

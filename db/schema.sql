@@ -120,3 +120,31 @@ CREATE TABLE IF NOT EXISTS public.feature_drift (
     computed_at     TIMESTAMP NOT NULL DEFAULT now(),
     PRIMARY KEY (reference_batch, current_batch, feature)
 );
+
+-- AI agent layer: cached LLM-generated content (explanation_agent /
+-- outreach_agent), keyed by customer + agent type + the churn model
+-- version whose SHAP output grounded it. Written/read by
+-- src/agents/cache.py. Also created on demand by ensure_tables() so the
+-- module works against a warehouse that predates this file.
+CREATE TABLE IF NOT EXISTS public.llm_explanations (
+    customer_id        TEXT NOT NULL,
+    agent_type          TEXT NOT NULL,
+    model_version       TEXT NOT NULL,
+    content             TEXT NOT NULL,
+    prompt_tokens       INTEGER,
+    completion_tokens   INTEGER,
+    created_at          TIMESTAMP NOT NULL DEFAULT now(),
+    PRIMARY KEY (customer_id, agent_type, model_version)
+);
+
+-- One row per completed retrain, written by the DAG's summarize_retrain
+-- task (retrain_summary_agent). The plain-English narrative counterpart
+-- to models_store/*.json's structured metrics.
+CREATE TABLE IF NOT EXISTS public.retrain_summaries (
+    churn_model_version  TEXT PRIMARY KEY,
+    previous_version     TEXT,
+    summary_text         TEXT NOT NULL,
+    prompt_tokens        INTEGER,
+    completion_tokens    INTEGER,
+    created_at           TIMESTAMP NOT NULL DEFAULT now()
+);

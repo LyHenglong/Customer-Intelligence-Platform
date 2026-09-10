@@ -3,7 +3,8 @@ Orchestrates one simulated batch arrival: ingest the next unprocessed
 batch file (DuckDB cleaning/typing/feature engineering + Postgres load,
 all inside src/ingest/batch_loader.py) -> dbt run -> dbt test -> PSI drift
 check -> retrain the churn model on the now-larger customer_360, either
-every Nth batch or whenever the drift check finds a shifted feature.
+every Nth batch or whenever the drift check finds a shifted feature ->
+(on an actual retrain) an AI-generated plain-English summary of it.
 
 Manually triggered (schedule=None), not time-based: each DAG run represents
 one simulated weekly batch "arriving", which happens whenever a user or a
@@ -163,6 +164,66 @@ def churn_pipeline():
         )
         return metadata
 
+    @task
+    def summarize_retrain(current_metadata: dict, drift_summary: dict) -> dict:
+        """AI Agent Layer: writes a plain-English summary of this retrain -
+        whether the model improved, stayed about the same, or regressed,
+        and whether drift played a role - alongside the structured metrics
+        retrain_churn_model already saved. Only reachable from the
+        retrain_churn_model branch: skip_retrain produces no new metrics,
+        so there is nothing here to summarize on that path.
+
+        Never fails the pipeline over an LLM outage: on any agent failure,
+        falls back to a summary built directly from the raw metrics/drift
+        dicts. The structured numbers are already safely persisted by
+        retrain_churn_model regardless - this task only adds a narrative
+        on top, so it degrades rather than blocks."""
+        import json
+        from pathlib import Path
+
+        from src.agents.cache import put_retrain_summary
+        from src.agents.groq_client import AgentCallFailed
+        from src.agents.retrain_summary_agent import summarize_retrain as ai_summarize_retrain
+
+        models_dir = Path("/opt/airflow/models_store")
+        # Newest is the artifact retrain_churn_model just wrote; the one
+        # before it is "previous" for this comparison.
+        all_versions = sorted(models_dir.glob("churn_model_*.json"))
+        previous_metadata = json.loads(all_versions[-2].read_text()) if len(all_versions) >= 2 else None
+
+        try:
+            response = ai_summarize_retrain(current_metadata, previous_metadata, drift_summary)
+            summary_text, prompt_tokens, completion_tokens, source = (
+                response.text, response.prompt_tokens, response.completion_tokens, "llm",
+            )
+        except AgentCallFailed as exc:
+            log.warning("retrain summary agent unavailable, falling back to raw metrics: %s", exc)
+            prev_str = f"previous version {previous_metadata['version']}" if previous_metadata else "no previous version recorded"
+            summary_text = (
+                f"[AI summary unavailable - raw metrics] New model {current_metadata['version']}: "
+                f"precision={current_metadata['precision_churn']:.4f} recall={current_metadata['recall_churn']:.4f} "
+                f"f1={current_metadata['f1_churn']:.4f} roc_auc={current_metadata['roc_auc']:.4f}, vs {prev_str}. "
+                f"Drift: max PSI {drift_summary.get('max_psi', 0):.4f}, drift_detected={drift_summary.get('drift_detected', False)}."
+            )
+            prompt_tokens, completion_tokens, source = 0, 0, "fallback"
+
+        out_dir = Path("/opt/airflow/report/retrain_summaries")
+        out_dir.mkdir(parents=True, exist_ok=True)
+        out_path = out_dir / f"retrain_summary_{current_metadata['version']}.md"
+        out_path.write_text(
+            f"# Retrain summary: {current_metadata['version']}\n\nSource: {source}\n\n{summary_text}\n"
+        )
+
+        put_retrain_summary(
+            current_metadata["version"],
+            summary_text,
+            previous_version=previous_metadata["version"] if previous_metadata else None,
+            prompt_tokens=prompt_tokens,
+            completion_tokens=completion_tokens,
+        )
+        log.info("Retrain summary written (%s, source=%s): %s", out_path.name, source, summary_text)
+        return {"source": source, "summary_text": summary_text}
+
     skip_retrain = EmptyOperator(task_id="skip_retrain")
 
     pipeline_done = EmptyOperator(task_id="pipeline_done", trigger_rule=TriggerRule.NONE_FAILED_MIN_ONE_SUCCESS)
@@ -174,10 +235,13 @@ def churn_pipeline():
     branch = check_retrain_needed(drift_summary)
 
     ingested_batch >> dbt_run >> dbt_test >> drift_summary >> branch
-    # Sequential, not parallel: both retrains run in-process under
-    # LocalExecutor on a 3.8GB VM, and running them concurrently is what
-    # the memory ceiling cannot absorb (see docker-compose mem_limit notes).
-    branch >> retrain_churn_model() >> retrain_recommender() >> pipeline_done
+    # Sequential, not parallel: both retrains (plus the summary agent call)
+    # run in-process under LocalExecutor on a 3.8GB VM, and running them
+    # concurrently is what the memory ceiling cannot absorb (see
+    # docker-compose mem_limit notes).
+    churn_metadata = retrain_churn_model()
+    retrain_summary = summarize_retrain(churn_metadata, drift_summary)
+    branch >> churn_metadata >> retrain_summary >> retrain_recommender() >> pipeline_done
     branch >> skip_retrain >> pipeline_done
 
 
