@@ -1,6 +1,22 @@
 # Telecom Customer Churn & Recommendation Platform
 
+[![CI](https://github.com/LyHenglong/Customer-Intelligence-Platform/actions/workflows/ci.yml/badge.svg)](https://github.com/LyHenglong/Customer-Intelligence-Platform/actions/workflows/ci.yml)
+[![Python 3.11](https://img.shields.io/badge/python-3.11-blue.svg)](https://www.python.org/downloads/release/python-3110/)
+[![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
+
 A production-style data platform that predicts telecom customer churn and recommends services to at-risk customers, built on a large-scale synthetic dataset to demonstrate a realistic enterprise data pipeline: simulated batch ingestion, DuckDB processing, a dbt transformation layer with a Customer 360 mart, predictive modeling, and live serving — orchestrated end to end with Airflow.
+
+## Results at a glance
+
+Every number below is measured and reproducible, with the full derivation linked — none of it is an estimate. All figures come from a **synthetic** dataset (see [A note on the data](#a-note-on-the-data)); read the business framing as a demonstration of method, not a real-market claim.
+
+| | |
+| --- | --- |
+| **Targeting value** | Model-driven targeting nets **$1.41M** on a **$2.26M** offer budget, vs. **$89K** net on a **$6.00M** budget for contacting everyone untargeted — cheaper *and* ~16x more valuable ([Probability calibration](#probability-calibration) → `report/findings.md` §6) |
+| **Churn model** | LightGBM, **calibrated** (Brier 0.087, beats the always-base-rate baseline of 0.090) — a real probability, not just a ranking score ([Probability calibration](#probability-calibration)) |
+| **Recommender** | Beats a popularity baseline by **+2.5% MRR**, confirmed significant (bootstrap 95% CI entirely above zero, McNemar p = 2.3×10⁻⁹) — not just eyeballed off a metrics table ([Recommender evaluation](#recommender-evaluation)) |
+| **Drift monitoring** | PSI-based, verified to fire on injected shifts (18 tests) *and* in a live triggered DAG run — correctly found no drift across 12 real batch comparisons ([Drift monitoring](#drift-monitoring)) |
+| **Scale & rigor** | 1,000,000 rows end to end, 63/63 tests green in CI, full Airflow DAG runs verified against a live webserver (not `airflow tasks test` shortcuts) ([Verified state](#verified-state)) |
 
 ## The dashboard
 
