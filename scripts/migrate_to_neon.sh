@@ -11,7 +11,14 @@
 #   ./scripts/migrate_to_neon.sh "postgresql://user:pass@host/dbname?sslmode=require"
 #
 # Requires the local docker-compose postgres service to be running
-# (docker compose up -d postgres) and psql available on the host.
+# (docker compose up -d postgres). Does NOT require psql on the host - both
+# the dump (from local) and the restore (to the target) run through the
+# postgres container's own psql/pg_dump, piped to/from the target's real
+# hostname. This matters on Windows/Git Bash hosts in particular, which
+# don't ship a psql binary at all (confirmed absent when this was first run
+# for real) - the container has one, and Docker containers have outbound
+# internet access by default, so it can reach an external target like Neon
+# just as well as it reaches the local "postgres" service.
 set -euo pipefail
 
 TARGET_DSN="${1:?Usage: $0 <target-postgres-connection-string>}"
@@ -32,13 +39,13 @@ docker compose exec -T postgres pg_dump \
 echo "==> Dump written: $DUMP_FILE ($(du -h "$DUMP_FILE" | cut -f1))"
 
 echo "==> Ensuring the marts schema exists on the target (pg_dump -t doesn't emit CREATE SCHEMA)..."
-psql "$TARGET_DSN" -c "CREATE SCHEMA IF NOT EXISTS marts;"
+docker compose exec -T postgres psql "$TARGET_DSN" -c "CREATE SCHEMA IF NOT EXISTS marts;"
 
-echo "==> Restoring into target..."
-psql "$TARGET_DSN" -v ON_ERROR_STOP=1 -f "$DUMP_FILE"
+echo "==> Restoring into target (a 213MB dump over a real network - this can take several minutes, see the README's note on Neon latency)..."
+docker compose exec -T postgres psql "$TARGET_DSN" -v ON_ERROR_STOP=1 -f /dev/stdin < "$DUMP_FILE"
 
 echo "==> Verifying row counts on the target..."
-psql "$TARGET_DSN" -t -A -c "
+docker compose exec -T postgres psql "$TARGET_DSN" -t -A -c "
 SELECT 'customer_360', COUNT(*) FROM marts.customer_360
 UNION ALL SELECT 'ingestion_log', COUNT(*) FROM public.ingestion_log
 UNION ALL SELECT 'feature_drift', COUNT(*) FROM public.feature_drift;
