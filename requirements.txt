@@ -8,7 +8,7 @@ numpy==1.26.4
 # connection everywhere in this project, not a SQLAlchemy Engine, so the
 # same code works unchanged inside the Airflow image, which bundles an
 # older SQLAlchemy that pandas 2.2.x's Engine-detection doesn't handle.)
-psycopg2-binary==2.9.10
+psycopg2-binary==2.9.12
 
 # Transformation
 dbt-core==1.8.9
