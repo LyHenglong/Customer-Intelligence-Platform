@@ -1,0 +1,28 @@
+# Subset of requirements.txt actually imported by src/dashboard/app.py's
+# full import chain (verified by tracing app.py -> train_churn.py /
+# train_recommender.py / explain_churn.py / src/agents/*.py) - deliberately
+# excludes dbt-core/dbt-postgres, kaggle, fastapi/uvicorn/pydantic, and
+# pytest/httpx, none of which the dashboard needs at runtime.
+#
+# Same reasoning as requirements-airflow.txt: Streamlit Community Cloud's
+# free tier has real build-time and memory limits, and dbt-core alone pulls
+# in a large transitive dependency tree the dashboard never touches - not
+# worth the slower build and larger image for code that's never imported.
+#
+# Used only for the Streamlit Cloud deployment, via its "requirements file"
+# setting (see README's "AI Agent Layer" / deploy instructions) - local
+# development and the Docker image still use the full requirements.txt.
+
+pandas==2.2.3
+numpy==1.26.4
+psycopg2-binary==2.9.10
+scikit-learn==1.5.2
+lightgbm==4.5.0
+joblib==1.4.2
+scipy==1.14.1
+dill==0.3.1.1
+streamlit==1.40.1
+plotly==5.24.1
+shap==0.46.0
+groq==1.7.0
+python-dotenv==1.0.1

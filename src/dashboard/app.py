@@ -28,7 +28,43 @@ from dotenv import load_dotenv
 
 os.environ.setdefault("LOKY_MAX_CPU_COUNT", str(os.cpu_count() or 4))
 
+# Must be the literal first Streamlit command in the script - Streamlit
+# raises StreamlitSetPageConfigMustBeFirstCommandError otherwise. Moved
+# here specifically because the st.secrets access just below also counts
+# as a Streamlit command and was tripping that check when set_page_config
+# came after it (caught by actually running this under `streamlit run`
+# against the trimmed Streamlit Cloud requirements - a plain `import`
+# doesn't reach this, so it didn't surface until then).
+st.set_page_config(page_title="Retention Command Center", layout="wide", initial_sidebar_state="expanded")
+
 load_dotenv()
+
+# Streamlit Community Cloud: secrets are set via its own UI (a TOML blob,
+# not a .env file) and land in st.secrets, not necessarily os.environ.
+# Every config read in this file uses os.environ.get(...) - bridging
+# st.secrets into os.environ here, once, at import time, means the exact
+# same code runs unchanged locally (.env / docker-compose env vars) and on
+# Streamlit Cloud, rather than needing two config-reading code paths.
+#
+# Gated on the file actually existing, checked with a plain path check
+# rather than by just trying st.secrets and catching the failure: merely
+# *accessing* st.secrets makes Streamlit render its own "No secrets found"
+# warning banner at the top of the page, regardless of whether the access
+# is wrapped in try/except - caught by actually running this under
+# `streamlit run` locally (a plain import doesn't trigger Streamlit's UI
+# layer, so it didn't surface until then). Every local and Docker run has
+# no secrets.toml, so without this gate that banner would appear on every
+# screenshot and every real user's session, not just this test.
+_secrets_paths = [
+    Path.home() / ".streamlit" / "secrets.toml",
+    Path(__file__).resolve().parents[2] / ".streamlit" / "secrets.toml",
+]
+if any(p.exists() for p in _secrets_paths):
+    try:
+        for _key, _value in st.secrets.items():
+            os.environ.setdefault(_key, str(_value))
+    except Exception:
+        pass
 
 from src.warehouse import stream_query  # noqa: E402
 from src.model.train_churn import ALL_FEATURES as CHURN_FEATURES  # noqa: E402
@@ -59,8 +95,6 @@ def log_agent_failure(agent_type: str, customer_id: str, exc: Exception) -> None
     logging.getLogger("dashboard.agents").warning(
         "%s agent failed for %s, falling back to raw data: %s", agent_type, customer_id, exc
     )
-
-st.set_page_config(page_title="Retention Command Center", layout="wide", initial_sidebar_state="expanded")
 
 # ---------------------------------------------------------------------------
 # Design system: a small set of CSS custom properties, applied consistently
@@ -231,6 +265,10 @@ def get_pg_conn():
         dbname=os.environ.get("POSTGRES_DB", "warehouse"),
         user=os.environ.get("POSTGRES_USER"),
         password=os.environ.get("POSTGRES_PASSWORD"),
+        # See src/warehouse.py's get_pg_conn for why "prefer": lets this
+        # same code reach both the local Docker Postgres (no SSL) and a
+        # hosted provider like Neon (SSL required).
+        sslmode=os.environ.get("POSTGRES_SSLMODE", "prefer"),
     )
 
 
