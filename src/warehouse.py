@@ -33,6 +33,12 @@ def get_pg_conn():
         dbname=os.environ.get("POSTGRES_DB", "warehouse"),
         user=os.environ.get("POSTGRES_USER"),
         password=os.environ.get("POSTGRES_PASSWORD"),
+        # "prefer" (not the previously-implicit default), so the same code
+        # connects to both the local Docker Postgres (no SSL configured)
+        # and a hosted provider like Neon (SSL required) without a
+        # per-environment branch - it negotiates SSL when the server
+        # offers it, plaintext otherwise.
+        sslmode=os.environ.get("POSTGRES_SSLMODE", "prefer"),
     )
 
 
