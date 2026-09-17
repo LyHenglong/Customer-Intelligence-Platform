@@ -91,6 +91,17 @@ class ChurnAnalysisResult(BaseModel):
     filters_applied: dict = Field(default_factory=dict)
 
 
+class RetrievalCandidate(BaseModel):
+    document_id: str
+    chunk_id: str
+    text: str
+    title: str
+    section: Optional[str] = None
+    score: float
+    rank: int
+    retrieval_method: str = Field(..., description='e.g. "hybrid_reranked", "hybrid", "vector_only", "bm25_only"')
+
+
 class SQLQueryResult(BaseModel):
     sql: str = Field(..., description="The validated query actually executed")
     columns: list[str]

@@ -52,7 +52,13 @@ x-airflow-common: &airflow-common
 
 services:
   postgres:
-    image: postgres:16-alpine
+    # pgvector/pgvector:pg16, not postgres:16-alpine: same Postgres 16,
+    # plus the pgvector extension public.rag_chunks needs (src/ai/rag/) -
+    # one image swap rather than a second database service, per
+    # AI_Customer_Intelligence_Claude_Code_Plan.md section 4's instruction
+    # to avoid unnecessary infrastructure. Neon (the hosted deployment
+    # target) supports the same "CREATE EXTENSION vector" directly.
+    image: pgvector/pgvector:pg16
     shm_size: 256mb
     environment:
       POSTGRES_USER: ${POSTGRES_USER}

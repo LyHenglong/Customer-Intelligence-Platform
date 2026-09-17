@@ -16,7 +16,9 @@ COPY src/__init__.py /app/src/__init__.py
 COPY src/warehouse.py /app/src/warehouse.py
 COPY src/model /app/src/model
 COPY src/agents /app/src/agents
+COPY src/ai /app/src/ai
 COPY models_store /app/models_store
+COPY knowledge /app/knowledge
 
 EXPOSE 8000
 CMD ["uvicorn", "src.model.api:app", "--host", "0.0.0.0", "--port", "8000"]

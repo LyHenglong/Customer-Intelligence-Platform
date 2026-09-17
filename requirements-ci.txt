@@ -1,0 +1,39 @@
+# Subset of requirements.txt actually needed to import and run the test
+# suite. Excludes sentence-transformers on purpose: it pulls in PyTorch
+# (a slow, large, network-heavy install), and no test in tests/ ever
+# calls the functions that actually load an embedding/reranker model
+# (src/ai/rag/embeddings.py, src/ai/rag/reranker.py) - those are lazy,
+# module-scoped singletons, and every RAG test monkeypatches them out
+# (see tests/test_ai_rag_hybrid_search.py, tests/test_ai_rag_ingest.py).
+# Installing it here would only slow CI down for coverage it doesn't add
+# - the same reasoning as requirements-streamlit-cloud.txt and
+# docker/requirements-airflow.txt trimming out what their runtime never
+# imports.
+#
+# Same reasoning as requirements-airflow.txt for the missing sqlalchemy
+# pin: not used.
+
+duckdb==1.1.3
+pandas==2.2.3
+numpy==1.26.4
+psycopg2-binary==2.9.12
+dbt-core==1.8.9
+dbt-postgres==1.8.2
+scikit-learn==1.5.2
+lightgbm==4.5.0
+joblib==1.4.2
+scipy==1.14.1
+dill==0.3.1.1
+fastapi==0.115.5
+uvicorn[standard]==0.32.1
+pydantic==2.10.2
+streamlit==1.40.1
+plotly==5.24.1
+shap==0.46.0
+groq==1.7.0
+kaggle==1.6.17
+python-dotenv==1.0.1
+pytest==8.3.3
+httpx==0.27.2
+rank-bm25==0.2.2
+pgvector==0.3.6
