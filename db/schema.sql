@@ -174,3 +174,30 @@ CREATE TABLE IF NOT EXISTS public.rag_chunks (
 );
 
 CREATE INDEX IF NOT EXISTS idx_rag_chunks_document_id ON public.rag_chunks (document_id);
+
+-- One row per AI assistant request (src/ai/graph.py's run_query, written
+-- by src/ai/observability/tracing.py). Deliberately excludes the
+-- generated answer text and full evidence values - routing/timing/
+-- token/cost metadata only, never the customer data a response's
+-- evidence carried. Also created on demand by tracing.ensure_table() so
+-- the module works against a warehouse that predates this file.
+CREATE TABLE IF NOT EXISTS public.ai_traces (
+    trace_id             TEXT PRIMARY KEY,
+    request_timestamp    TIMESTAMP NOT NULL DEFAULT now(),
+    user_query           TEXT NOT NULL,
+    route                TEXT,
+    tools_used           JSONB NOT NULL DEFAULT '[]'::jsonb,
+    tool_latency_ms      JSONB NOT NULL DEFAULT '{}'::jsonb,
+    sql_query_hash       TEXT,
+    retrieval_latency_ms DOUBLE PRECISION,
+    retrieved_documents  JSONB NOT NULL DEFAULT '[]'::jsonb,
+    reranker_latency_ms  DOUBLE PRECISION,
+    llm_model            TEXT,
+    input_tokens         INTEGER,
+    output_tokens        INTEGER,
+    estimated_cost_usd   DOUBLE PRECISION,
+    total_latency_ms     DOUBLE PRECISION,
+    validation_result    TEXT,
+    fallback_status      BOOLEAN NOT NULL DEFAULT false,
+    error                TEXT
+);

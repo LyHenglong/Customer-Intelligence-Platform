@@ -66,3 +66,23 @@ def test_assistant_query_accepts_optional_conversation_id(monkeypatch):
 
     assert response.status_code == 200
     assert captured["query"] == "hello"
+
+
+def test_assistant_trace_returns_the_stored_trace(monkeypatch):
+    canned_trace = {"trace_id": "t1", "route": "ML_ANALYSIS", "total_latency_ms": 42.0}
+    monkeypatch.setattr(api_module, "ai_get_trace", lambda trace_id: canned_trace)
+
+    with TestClient(api_module.app) as client:
+        response = client.get("/assistant/trace/t1")
+
+    assert response.status_code == 200
+    assert response.json() == canned_trace
+
+
+def test_assistant_trace_404s_when_not_found(monkeypatch):
+    monkeypatch.setattr(api_module, "ai_get_trace", lambda trace_id: None)
+
+    with TestClient(api_module.app) as client:
+        response = client.get("/assistant/trace/does-not-exist")
+
+    assert response.status_code == 404

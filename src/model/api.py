@@ -45,6 +45,7 @@ from src.agents.groq_client import AgentCallFailed
 from src.agents.explanation_agent import explain_churn as ai_explain_churn
 from src.agents.cache import get_or_generate
 from src.ai.graph import run_query as ai_run_query
+from src.ai.observability.tracing import get_trace as ai_get_trace
 from src.ai.schemas import AssistantResponse
 
 os.environ.setdefault("LOKY_MAX_CPU_COUNT", str(os.cpu_count() or 4))
@@ -347,3 +348,16 @@ def assistant_query(req: AssistantQueryRequest):
     if not req.query or not req.query.strip():
         raise HTTPException(status_code=422, detail="query must not be empty")
     return ai_run_query(req.query)
+
+
+@app.get("/assistant/trace/{trace_id}")
+def assistant_trace(trace_id: str):
+    """Debugging/observability endpoint (AI_Customer_Intelligence_Claude_Code_Plan.md
+    section 28) over the trace src/ai/graph.py wrote for a given request
+    (src/ai/observability/tracing.py). 404s rather than 200-with-null on a
+    miss, unlike most read paths in this API, since there's no meaningful
+    partial answer for "this trace_id doesn't exist"."""
+    trace = ai_get_trace(trace_id)
+    if trace is None:
+        raise HTTPException(status_code=404, detail=f"trace_id {trace_id!r} not found")
+    return trace

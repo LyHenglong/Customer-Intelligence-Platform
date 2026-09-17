@@ -15,6 +15,14 @@ first, evidence is aggregated from their structured output, and only then
 does the LLM turn that evidence into prose. If no tool produced any
 evidence, the LLM is never called at all - the response is the fixed
 "insufficient evidence" answer, not a guess.
+
+Each tool call is wrapped so one tool's failure (a transient DB error, a
+bad generated SQL string) degrades that one branch rather than the whole
+request - matching this project's existing "LLM/DB outage never takes
+down the response" precedent (src/agents/groq_client.py, src/model/api.py's
+/explain-churn). A trace (src/ai/observability/tracing.py, section 22) is
+written at the end of every call, itself wrapped so a trace-write failure
+can never affect the response either.
 """
 
 from __future__ import annotations
@@ -26,6 +34,8 @@ import uuid
 from src.agents.groq_client import AgentCallFailed
 from src.ai.guardrails.validation import validate_response
 from src.ai.llm import get_llm_provider
+from src.ai.observability import tracing
+from src.ai.observability.cost import estimate_cost
 from src.ai.rag.hybrid_search import hybrid_search
 from src.ai.router import (
     CUSTOMER_LOOKUP,
@@ -78,6 +88,22 @@ def _strip_sql_fences(text: str) -> str:
     return text.strip()
 
 
+def _run_timed(tool_latency: dict, errors: list, tool_name: str, fn):
+    """Runs fn(), recording elapsed ms into tool_latency[tool_name]. Any
+    exception is logged and appended to errors rather than propagated -
+    one tool's failure degrades that one branch, not the whole request."""
+    t0 = time.monotonic()
+    try:
+        result = fn()
+    except Exception as exc:
+        tool_latency[tool_name] = round((time.monotonic() - t0) * 1000, 2)
+        log.exception("%s failed", tool_name)
+        errors.append(f"{tool_name}: {exc}")
+        return None
+    tool_latency[tool_name] = round((time.monotonic() - t0) * 1000, 2)
+    return result
+
+
 def _gather_customer_evidence(customer_id: str) -> tuple[list[Evidence], list[Citation], str | None]:
     evidence: list[Evidence] = []
     citations: list[Citation] = []
@@ -122,34 +148,37 @@ def _gather_customer_evidence(customer_id: str) -> tuple[list[Evidence], list[Ci
 
 
 def _generate_and_run_sql(query: str, llm):
+    """Returns (SQLQueryResult | None, AgentResponse | None) - the second
+    element lets callers add the SQL-generation call's token usage to
+    the trace even when the generated query turns out empty/unsafe."""
     try:
-        response = llm.complete(
+        gen_response = llm.complete(
             system_prompt=_SQL_GENERATION_SYSTEM_PROMPT, user_prompt=query,
             max_tokens=300, temperature=0.0,
         )
     except AgentCallFailed as exc:
         log.warning("SQL generation LLM call failed: %s", exc)
-        return None
+        return None, None
 
-    candidate_sql = _strip_sql_fences(response.text)
+    candidate_sql = _strip_sql_fences(gen_response.text)
     try:
-        return run_sql(candidate_sql)
+        return run_sql(candidate_sql), gen_response
     except Exception as exc:  # SQLSafetyError or a real Postgres error
         log.warning("LLM-generated SQL rejected/failed: %s | sql=%r", exc, candidate_sql)
-        return None
+        return None, gen_response
 
 
-def _gather_sql_evidence(query: str) -> tuple[list[Evidence], list[Citation]]:
-    result = _generate_and_run_sql(query, get_llm_provider())
-    if result is None or not result.rows:
-        return [], []
+def _gather_sql_evidence(query: str):
+    sql_result, agent_response = _generate_and_run_sql(query, get_llm_provider())
+    if sql_result is None or not sql_result.rows:
+        return [], [], sql_result, agent_response
     evidence = [Evidence(
         type="database", source="marts.customer_360 (generated query)",
         claim="Result of a generated SQL query answering this question",
-        value=str(result.rows[:10]),
+        value=str(sql_result.rows[:10]),
     )]
     citations = [Citation(label="[Customer 360: generated query]", type="database", source="marts.customer_360")]
-    return evidence, citations
+    return evidence, citations, sql_result, agent_response
 
 
 def _gather_ml_evidence() -> tuple[list[Evidence], list[Citation], str | None]:
@@ -186,7 +215,8 @@ def _gather_rag_evidence(query: str) -> tuple[list[Evidence], list[Citation]]:
     return evidence, citations
 
 
-def _generate_answer(query: str, evidence: list[Evidence]) -> str:
+def _generate_answer(query: str, evidence: list[Evidence]):
+    """Returns (answer_text, AgentResponse | None, generation_failed)."""
     evidence_text = "\n".join(f"- ({e.type}, {e.source}) {e.claim}: {e.value}" for e in evidence)
     try:
         response = get_llm_provider().complete(
@@ -194,10 +224,39 @@ def _generate_answer(query: str, evidence: list[Evidence]) -> str:
             user_prompt=f"Question: {query}\n\nEvidence:\n{evidence_text}",
             max_tokens=400, temperature=0.2,
         )
-        return response.text.strip()
+        return response.text.strip(), response, False
     except AgentCallFailed as exc:
         log.warning("answer generation LLM call failed, falling back to a templated evidence summary: %s", exc)
-        return "Based on the available evidence:\n" + evidence_text
+        return "Based on the available evidence:\n" + evidence_text, None, True
+
+
+def _write_trace_safely(**trace_fields) -> None:
+    try:
+        tracing.write_trace({
+            "trace_id": trace_fields["trace_id"],
+            "user_query": trace_fields["query"],
+            "route": trace_fields["route"],
+            "tools_used": trace_fields["tools_used"],
+            "tool_latency_ms": trace_fields["tool_latency"],
+            "sql_query_hash": trace_fields["sql_hash"],
+            "retrieval_latency_ms": trace_fields["tool_latency"].get("hybrid_search"),
+            "retrieved_documents": trace_fields["retrieved_documents"],
+            # Not separately instrumented - see src/ai/rag/hybrid_search.py;
+            # "hybrid_search" in tool_latency_ms covers retrieval end-to-end.
+            "reranker_latency_ms": None,
+            "llm_model": trace_fields["llm_model"],
+            "input_tokens": trace_fields["input_tokens"],
+            "output_tokens": trace_fields["output_tokens"],
+            "estimated_cost_usd": estimate_cost(
+                trace_fields["llm_model"], trace_fields["input_tokens"], trace_fields["output_tokens"]
+            ),
+            "total_latency_ms": trace_fields["total_latency_ms"],
+            "validation_result": trace_fields["validation_result"],
+            "fallback_status": trace_fields["fallback_status"],
+            "error": trace_fields["error"],
+        })
+    except Exception:
+        log.exception("failed to write trace %s (response is unaffected)", trace_fields["trace_id"])
 
 
 def run_query(query: str) -> AssistantResponse:
@@ -206,55 +265,103 @@ def run_query(query: str) -> AssistantResponse:
     route, signals = classify_with_signals(query)
 
     if route == UNSUPPORTED:
+        latency_ms = round((time.monotonic() - start) * 1000, 2)
+        _write_trace_safely(
+            trace_id=trace_id, query=query, route=route, tools_used=[], tool_latency={},
+            sql_hash=None, retrieved_documents=[], llm_model=None, input_tokens=0, output_tokens=0,
+            validation_result="unsupported", fallback_status=False, error=None, total_latency_ms=latency_ms,
+        )
         return AssistantResponse(
-            answer=UNSUPPORTED_ANSWER, route=route, trace_id=trace_id,
-            latency_ms=round((time.monotonic() - start) * 1000, 2),
+            answer=UNSUPPORTED_ANSWER, route=route, trace_id=trace_id, latency_ms=latency_ms,
         )
 
     evidence: list[Evidence] = []
     citations: list[Citation] = []
     tools_used: list[str] = []
+    tool_latency: dict[str, float] = {}
+    errors: list[str] = []
+    llm_calls = []
     model_version: str | None = None
+    sql_hash: str | None = None
 
     if signals["has_customer_id"]:
         tools_used.append("customer_lookup")
-        e, c, mv = _gather_customer_evidence(signals["customer_id"])
-        evidence += e
-        citations += c
-        model_version = model_version or mv
+        result = _run_timed(
+            tool_latency, errors, "customer_lookup",
+            lambda: _gather_customer_evidence(signals["customer_id"]),
+        )
+        if result is not None:
+            e, c, mv = result
+            evidence += e
+            citations += c
+            model_version = model_version or mv
 
     if route == SQL_ANALYSIS or (route == MULTI_SOURCE and signals["has_sql"]):
         tools_used.append("sql_tool")
-        e, c = _gather_sql_evidence(query)
-        evidence += e
-        citations += c
+        result = _run_timed(tool_latency, errors, "sql_tool", lambda: _gather_sql_evidence(query))
+        if result is not None:
+            e, c, sql_result, agent_response = result
+            evidence += e
+            citations += c
+            if sql_result is not None:
+                sql_hash = tracing.hash_sql(sql_result.sql)
+            if agent_response is not None:
+                llm_calls.append(agent_response)
 
     if route == ML_ANALYSIS or (route == MULTI_SOURCE and signals["has_ml"]):
         tools_used.append("churn_analysis")
-        e, c, mv = _gather_ml_evidence()
-        evidence += e
-        citations += c
-        model_version = model_version or mv
+        result = _run_timed(tool_latency, errors, "churn_analysis", _gather_ml_evidence)
+        if result is not None:
+            e, c, mv = result
+            evidence += e
+            citations += c
+            model_version = model_version or mv
 
     if route == RAG_SEARCH or (route == MULTI_SOURCE and signals["has_rag"]):
         tools_used.append("hybrid_search")
-        e, c = _gather_rag_evidence(query)
-        evidence += e
-        citations += c
+        result = _run_timed(tool_latency, errors, "hybrid_search", lambda: _gather_rag_evidence(query))
+        if result is not None:
+            e, c = result
+            evidence += e
+            citations += c
 
+    retrieved_documents = [e.source for e in evidence if e.type == "document"]
     latency_ms = round((time.monotonic() - start) * 1000, 2)
+    combined_error = "; ".join(errors) or None
 
     if not evidence:
+        _write_trace_safely(
+            trace_id=trace_id, query=query, route=route, tools_used=tools_used, tool_latency=tool_latency,
+            sql_hash=sql_hash, retrieved_documents=retrieved_documents, llm_model=None,
+            input_tokens=0, output_tokens=0, validation_result="insufficient_evidence",
+            fallback_status=False, error=combined_error, total_latency_ms=latency_ms,
+        )
         return AssistantResponse(
             answer=INSUFFICIENT_EVIDENCE_ANSWER, tools_used=tools_used,
             model_version=model_version, route=route, trace_id=trace_id, latency_ms=latency_ms,
         )
 
-    answer = _generate_answer(query, evidence)
+    answer_text, gen_response, generation_failed = _generate_answer(query, evidence)
+    if gen_response is not None:
+        llm_calls.append(gen_response)
     latency_ms = round((time.monotonic() - start) * 1000, 2)
 
     response = AssistantResponse(
-        answer=answer, citations=citations, evidence=evidence, tools_used=tools_used,
+        answer=answer_text, citations=citations, evidence=evidence, tools_used=tools_used,
         model_version=model_version, route=route, trace_id=trace_id, latency_ms=latency_ms,
     )
-    return validate_response(response)
+    validated = validate_response(response)
+
+    fallback_status = generation_failed or (validated.confidence == 0.5)
+    validation_result = "ungrounded_fallback" if validated.confidence == 0.5 else "grounded"
+    llm_model = llm_calls[-1].model if llm_calls else None
+    input_tokens = sum(r.prompt_tokens for r in llm_calls)
+    output_tokens = sum(r.completion_tokens for r in llm_calls)
+
+    _write_trace_safely(
+        trace_id=trace_id, query=query, route=route, tools_used=tools_used, tool_latency=tool_latency,
+        sql_hash=sql_hash, retrieved_documents=retrieved_documents, llm_model=llm_model,
+        input_tokens=input_tokens, output_tokens=output_tokens, validation_result=validation_result,
+        fallback_status=fallback_status, error=combined_error, total_latency_ms=validated.latency_ms,
+    )
+    return validated
