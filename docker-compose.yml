@@ -174,6 +174,12 @@ services:
       # and outreach sections. Optional - see the README's "AI Agent
       # Layer" section for the fallback behavior when unset.
       GROQ_API_KEY: ${GROQ_API_KEY:-}
+      # AI Decision Assistant tab (src/ai/graph.py): the dashboard calls
+      # the api service over HTTP rather than importing src.ai directly,
+      # since that needs sentence-transformers/PyTorch - see
+      # call_assistant_api()'s docstring in src/dashboard/app.py. Unset
+      # (empty) on Streamlit Cloud, where there is no api service.
+      AI_API_URL: http://api:8000
       # `streamlit run <script>` only adds the script's own directory to
       # sys.path, not the working directory - unlike a plain `python -c`
       # shell, which is why this didn't surface under `docker exec`
@@ -186,6 +192,7 @@ services:
       - "8501:8501"
     depends_on:
       - postgres
+      - api
     profiles: ["serving"]
     # Scoring 1,000,000 customers needs real headroom even after the
     # streaming redesign (see score_all_customers). On this 3.8GB Docker VM

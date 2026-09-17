@@ -90,6 +90,41 @@ TOTAL_SIMULATED_BATCHES = 13
 AI_AGENT_MAX_CUSTOMERS = 15
 GROQ_CONFIGURED = bool(os.environ.get("GROQ_API_KEY"))
 
+# AI Decision Assistant (src/ai/graph.py) - lives in the API service, not
+# this dashboard process, because it needs sentence-transformers (a
+# PyTorch dependency deliberately kept out of requirements-streamlit-cloud.txt -
+# see that file's own comment and src/ai/rag/embeddings.py). Empty by
+# default: only set when the full Docker stack (docker-compose.yml's
+# "serving" profile) or an equivalent deployment is actually running the
+# API service alongside this dashboard - the public Streamlit Cloud demo
+# does not, and the AI Assistant tab says so honestly rather than
+# pretending to work.
+AI_API_URL = os.environ.get("AI_API_URL", "").rstrip("/")
+
+
+def call_assistant_api(query: str, timeout: float = 30.0) -> dict:
+    """POSTs to the API service's /assistant/query (src/model/api.py).
+    Uses urllib (stdlib) rather than adding requests/httpx to this
+    dashboard's own dependencies for one JSON call. Always returns a
+    dict - {"error": "..."} on any failure (not configured, connection
+    refused, timeout, non-2xx) - so callers render that message instead
+    of letting an exception reach Streamlit's own traceback UI."""
+    if not AI_API_URL:
+        return {"error": "not_configured"}
+    import urllib.request
+
+    try:
+        req = urllib.request.Request(
+            f"{AI_API_URL}/assistant/query",
+            data=json.dumps({"query": query}).encode("utf-8"),
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            return json.loads(resp.read().decode("utf-8"))
+    except Exception as exc:
+        return {"error": str(exc)}
+
 
 def log_agent_failure(agent_type: str, customer_id: str, exc: Exception) -> None:
     logging.getLogger("dashboard.agents").warning(
@@ -630,7 +665,8 @@ def main():
     # OOM kills. A radio-based selector only runs the branch that's
     # actually being viewed, matching what the user asked to see.
     view = st.radio(
-        "View", ["Overview", "At-Risk Customers", "Segments", "Model Performance", "Pipeline Status"],
+        "View",
+        ["Overview", "At-Risk Customers", "Segments", "Model Performance", "Pipeline Status", "AI Assistant"],
         horizontal=True, label_visibility="collapsed",
     )
     st.markdown("&nbsp;")
@@ -1010,6 +1046,71 @@ def main():
                 "and the drift results from detect_feature_drift - never a second modeling step, only a "
                 "narration of numbers computed elsewhere (see the README's AI Agent Layer section)."
             )
+
+    # ------------------------------------------------------ AI Assistant
+    elif view == "AI Assistant":
+        section_header("AI DECISION ASSISTANT", "Ask a business question")
+        st.markdown(
+            '<div class="rc-disclosure">Evidence-grounded answers over this platform\'s own data, '
+            "models, and business documentation (src/ai/graph.py) - not a general-purpose chatbot. "
+            "Every number it states traces back to a tool result shown below the answer, and it "
+            'answers "I don\'t have enough evidence" rather than guessing when nothing was found.</div>',
+            unsafe_allow_html=True,
+        )
+
+        if not AI_API_URL:
+            st.info(
+                "The AI Decision Assistant runs inside the API service (src/model/api.py), which this "
+                "dashboard calls over HTTP rather than importing directly - it depends on "
+                "sentence-transformers/PyTorch, deliberately kept out of this dashboard's own "
+                "dependencies (see requirements-streamlit-cloud.txt). Run the full Docker stack "
+                "(`docker compose --profile serving up`) and set the `AI_API_URL` environment variable "
+                "(e.g. `http://api:8000`) to enable this tab - it is not available in this lightweight "
+                "public demo, and this message is here instead of a silent failure."
+            )
+        else:
+            example_questions = [
+                "Why is churn increasing among month-to-month customers?",
+                "What does our retention playbook recommend for high-risk customers?",
+                "What are the biggest risk factors for churn?",
+            ]
+            query = st.text_input(
+                "Ask a business question", placeholder=example_questions[0], label_visibility="collapsed",
+            )
+            st.caption("Try: " + " · ".join(f'"{q}"' for q in example_questions))
+
+            if st.button("Analyze", type="primary") and query.strip():
+                with st.spinner("Routing, gathering evidence, and generating an answer..."):
+                    result = call_assistant_api(query.strip())
+
+                if "error" in result:
+                    st.error(f"AI Assistant request failed: {result['error']}")
+                else:
+                    st.markdown(f"**{result.get('answer', '')}**")
+
+                    cols = st.columns(3)
+                    cols[0].caption(f"Route: `{result.get('route', 'n/a')}`")
+                    cols[1].caption(f"Tools used: {', '.join(result.get('tools_used') or []) or 'none'}")
+                    latency = result.get("latency_ms")
+                    cols[2].caption(f"Latency: {latency:.0f}ms" if latency is not None else "Latency: n/a")
+
+                    citations = result.get("citations") or []
+                    if citations:
+                        st.markdown("**Sources**")
+                        for c in citations:
+                            st.markdown(f"- {c.get('label', '')}")
+
+                    evidence = result.get("evidence") or []
+                    if evidence:
+                        with st.expander(f"Evidence ({len(evidence)} item(s))"):
+                            for e in evidence:
+                                st.markdown(f"**{e.get('type', '')} · {e.get('source', '')}**")
+                                st.caption(e.get("claim", ""))
+                                st.code(str(e.get("value", "")), language=None)
+
+                    confidence = result.get("confidence")
+                    if confidence is not None:
+                        st.caption(f"Grounding confidence: {confidence:.0%}")
 
 
 if __name__ == "__main__":
