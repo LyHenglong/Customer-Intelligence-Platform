@@ -7,6 +7,8 @@ fallback, not any real database/model/LLM call.
 
 from __future__ import annotations
 
+import pytest
+
 from src.agents.groq_client import AgentCallFailed, AgentResponse
 from src.ai import graph as graph_module
 from src.ai.schemas import (
@@ -18,6 +20,21 @@ from src.ai.schemas import (
     ShapFactor,
     SQLQueryResult,
 )
+
+
+@pytest.fixture(autouse=True)
+def captured_traces(monkeypatch):
+    """run_query() always attempts to write a trace (src/ai/observability/
+    tracing.py) - that write is itself wrapped so a failure can't affect
+    the response, but letting it actually try a real Postgres connection
+    in every test here would be slow/flaky/environment-dependent. Replaced
+    with an in-memory recorder instead: most tests ignore it, a few below
+    inspect it to pin what run_query() actually puts in a trace (DB
+    read/write behavior itself is tested separately in
+    tests/test_ai_observability_tracing.py)."""
+    calls = []
+    monkeypatch.setattr(graph_module.tracing, "write_trace", lambda trace: calls.append(trace))
+    return calls
 
 
 class _FakeProvider:
@@ -212,3 +229,103 @@ class TestGenerationFallback:
 
         assert result.answer.startswith("Based on the available evidence:")
         assert result.evidence  # evidence is still returned even though prose generation failed
+
+
+class TestTracing:
+    def test_unsupported_route_writes_a_trace(self, captured_traces):
+        graph_module.run_query("tell me tomorrow's weather")
+
+        assert len(captured_traces) == 1
+        trace = captured_traces[0]
+        assert trace["route"] == "UNSUPPORTED"
+        assert trace["validation_result"] == "unsupported"
+        assert trace["tools_used"] == []
+        assert trace["fallback_status"] is False
+
+    def test_insufficient_evidence_writes_a_trace_with_no_llm_usage(self, monkeypatch, captured_traces):
+        monkeypatch.setattr(graph_module, "customer_lookup", lambda cid: CustomerLookupResult(customer_id=cid, found=False))
+
+        graph_module.run_query("Show customer CUST000999")
+
+        trace = captured_traces[0]
+        assert trace["validation_result"] == "insufficient_evidence"
+        assert trace["llm_model"] is None
+        assert trace["input_tokens"] == 0
+        assert trace["output_tokens"] == 0
+
+    def test_grounded_answer_records_tool_latency_tokens_and_model(self, monkeypatch, captured_traces):
+        monkeypatch.setattr(graph_module, "churn_analysis", lambda: ChurnAnalysisResult(
+            population_size=1000, current_churn_rate=0.1, predicted_high_risk_count=120,
+            mean_churn_probability=0.15, median_churn_probability=0.12,
+            model_version="V2", threshold=0.11, filters_applied={},
+        ))
+        fake = _FakeProvider(responses=["Churn risk is concentrated among a subset of customers."])
+        monkeypatch.setattr(graph_module, "get_llm_provider", lambda: fake)
+
+        graph_module.run_query("What are the biggest risk factors for churn?")
+
+        trace = captured_traces[0]
+        assert "churn_analysis" in trace["tool_latency_ms"]
+        assert trace["tool_latency_ms"]["churn_analysis"] >= 0
+        assert trace["llm_model"] == "fake-model"
+        assert trace["input_tokens"] == 5  # from _FakeProvider's fixed AgentResponse
+        assert trace["output_tokens"] == 5
+        assert trace["validation_result"] == "grounded"
+        assert trace["fallback_status"] is False
+        assert trace["error"] is None
+
+    def test_ungrounded_answer_marks_fallback_in_the_trace(self, monkeypatch, captured_traces):
+        monkeypatch.setattr(graph_module, "churn_analysis", lambda: ChurnAnalysisResult(
+            population_size=1000, current_churn_rate=0.1, predicted_high_risk_count=120,
+            mean_churn_probability=0.15, median_churn_probability=0.12,
+            model_version="V2", threshold=0.11, filters_applied={},
+        ))
+        fake = _FakeProvider(responses=["The probability is 999999, way outside anything in evidence."])
+        monkeypatch.setattr(graph_module, "get_llm_provider", lambda: fake)
+
+        graph_module.run_query("What are the biggest risk factors for churn?")
+
+        trace = captured_traces[0]
+        assert trace["validation_result"] == "ungrounded_fallback"
+        assert trace["fallback_status"] is True
+
+    def test_llm_call_failure_marks_fallback_in_the_trace(self, monkeypatch, captured_traces):
+        monkeypatch.setattr(graph_module, "churn_analysis", lambda: ChurnAnalysisResult(
+            population_size=1000, current_churn_rate=0.1, predicted_high_risk_count=120,
+            mean_churn_probability=0.15, median_churn_probability=0.12,
+            model_version="V2", threshold=0.11, filters_applied={},
+        ))
+        monkeypatch.setattr(graph_module, "get_llm_provider", lambda: _FakeProvider(raise_on_call=True))
+
+        graph_module.run_query("What are the biggest risk factors for churn?")
+
+        trace = captured_traces[0]
+        assert trace["fallback_status"] is True
+        assert trace["llm_model"] is None  # the failed call produced no AgentResponse to read a model from
+
+    def test_a_failing_tool_is_recorded_as_an_error_but_does_not_crash(self, monkeypatch, captured_traces):
+        def _raises():
+            raise RuntimeError("simulated DB outage")
+
+        monkeypatch.setattr(graph_module, "churn_analysis", _raises)
+        monkeypatch.setattr(graph_module, "get_llm_provider", lambda: _FakeProvider())
+
+        result = graph_module.run_query("What are the biggest risk factors for churn?")
+
+        assert result.answer == graph_module.INSUFFICIENT_EVIDENCE_ANSWER
+        trace = captured_traces[0]
+        assert "churn_analysis: simulated DB outage" in trace["error"]
+
+    def test_sql_result_hashes_the_generated_query_not_the_raw_text(self, monkeypatch, captured_traces):
+        monkeypatch.setattr(graph_module, "run_sql", lambda q: SQLQueryResult(
+            sql=q, columns=["contract"], rows=[["month_to_month"]], row_count=1,
+            truncated=False, execution_time_ms=1.0,
+        ))
+        fake = _FakeProvider(responses=["SELECT contract FROM marts.customer_360 LIMIT 10", "Answer."])
+        monkeypatch.setattr(graph_module, "get_llm_provider", lambda: fake)
+
+        graph_module.run_query("How many customers do we have on average per segment?")
+
+        trace = captured_traces[0]
+        assert trace["sql_query_hash"] is not None
+        assert trace["sql_query_hash"] != "SELECT contract FROM marts.customer_360 LIMIT 10"
