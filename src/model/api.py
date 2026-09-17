@@ -44,6 +44,8 @@ from src.model.explain_churn import compute_shap_details, format_risk_factors_te
 from src.agents.groq_client import AgentCallFailed
 from src.agents.explanation_agent import explain_churn as ai_explain_churn
 from src.agents.cache import get_or_generate
+from src.ai.graph import run_query as ai_run_query
+from src.ai.schemas import AssistantResponse
 
 os.environ.setdefault("LOKY_MAX_CPU_COUNT", str(os.cpu_count() or 4))
 
@@ -327,3 +329,21 @@ def explain_churn_endpoint(customer_id: str):
         source=source,
         model_version=_state["churn_version"],
     )
+
+
+class AssistantQueryRequest(BaseModel):
+    query: str
+    conversation_id: Optional[str] = None  # accepted, not yet used - see AI_Customer_Intelligence_Claude_Code_Plan.md section 27
+
+
+@app.post("/assistant/query", response_model=AssistantResponse)
+def assistant_query(req: AssistantQueryRequest):
+    """AI decision assistant (src/ai/graph.py): routes the question to the
+    structured tools, controlled SQL, and RAG layers, aggregates their
+    output as evidence, and only then asks the LLM to turn that evidence
+    into an answer - never the other way around. Independent of the
+    startup-loaded churn/recommender artifacts above (_state); the tool
+    layer loads and caches its own copies (src/ai/tools/_artifacts.py)."""
+    if not req.query or not req.query.strip():
+        raise HTTPException(status_code=422, detail="query must not be empty")
+    return ai_run_query(req.query)

@@ -102,6 +102,31 @@ class RetrievalCandidate(BaseModel):
     retrieval_method: str = Field(..., description='e.g. "hybrid_reranked", "hybrid", "vector_only", "bm25_only"')
 
 
+class Evidence(BaseModel):
+    type: str = Field(..., description='"database", "model", or "document"')
+    source: str
+    claim: str
+    value: Optional[str] = None
+
+
+class Citation(BaseModel):
+    label: str = Field(..., description='Display text, e.g. "[Customer 360: 1,000,000 customer records]"')
+    type: str
+    source: str
+
+
+class AssistantResponse(BaseModel):
+    answer: str
+    citations: list[Citation] = Field(default_factory=list)
+    evidence: list[Evidence] = Field(default_factory=list)
+    tools_used: list[str] = Field(default_factory=list)
+    model_version: Optional[str] = None
+    confidence: Optional[float] = None
+    route: Optional[str] = None
+    trace_id: Optional[str] = None
+    latency_ms: Optional[float] = None
+
+
 class SQLQueryResult(BaseModel):
     sql: str = Field(..., description="The validated query actually executed")
     columns: list[str]
