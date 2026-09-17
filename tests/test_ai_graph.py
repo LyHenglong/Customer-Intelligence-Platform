@@ -89,12 +89,15 @@ class TestCustomerLookupRoute:
 class TestSQLAnalysisRoute:
     def test_generated_sql_with_rows_becomes_evidence(self, monkeypatch):
         monkeypatch.setattr(graph_module, "run_sql", lambda q: SQLQueryResult(
-            sql=q, columns=["contract", "churn_rate"], rows=[["month_to_month", 0.3]],
+            sql=q, columns=["contract", "churn_rate"], rows=[["month_to_month", 30]],
             row_count=1, truncated=False, execution_time_ms=1.0,
         ))
         fake = _FakeProvider(responses=[
             "SELECT contract, AVG(churn) FROM marts.customer_360 GROUP BY contract LIMIT 10",
-            "Month-to-month customers churn at 30%.",
+            # "30" (not "0.3"/"30%") so it text-matches the evidence's str(rows)
+            # verbatim - the grounding guardrail (src/ai/guardrails/grounding.py)
+            # does exact-text number matching, not unit-aware equivalence.
+            "Month-to-month customers churn at a rate of 30.",
         ])
         monkeypatch.setattr(graph_module, "get_llm_provider", lambda: fake)
 
@@ -104,8 +107,9 @@ class TestSQLAnalysisRoute:
         assert result.tools_used == ["sql_tool"]
         assert len(result.evidence) == 1
         assert result.evidence[0].type == "database"
-        assert result.answer == "Month-to-month customers churn at 30%."
+        assert result.answer == "Month-to-month customers churn at a rate of 30."
         assert len(fake.calls) == 2  # SQL generation + answer generation
+        assert result.confidence == 1.0  # grounding guardrail passed
 
     def test_unsafe_generated_sql_yields_insufficient_evidence(self, monkeypatch):
         monkeypatch.setattr(graph_module, "run_sql", lambda q: (_ for _ in ()).throw(ValueError("unsafe")))

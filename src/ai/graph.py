@@ -24,6 +24,7 @@ import time
 import uuid
 
 from src.agents.groq_client import AgentCallFailed
+from src.ai.guardrails.validation import validate_response
 from src.ai.llm import get_llm_provider
 from src.ai.rag.hybrid_search import hybrid_search
 from src.ai.router import (
@@ -252,7 +253,8 @@ def run_query(query: str) -> AssistantResponse:
     answer = _generate_answer(query, evidence)
     latency_ms = round((time.monotonic() - start) * 1000, 2)
 
-    return AssistantResponse(
+    response = AssistantResponse(
         answer=answer, citations=citations, evidence=evidence, tools_used=tools_used,
         model_version=model_version, route=route, trace_id=trace_id, latency_ms=latency_ms,
     )
+    return validate_response(response)
