@@ -91,6 +91,17 @@ class ChurnAnalysisResult(BaseModel):
     filters_applied: dict = Field(default_factory=dict)
 
 
+class BenchmarkQuestion(BaseModel):
+    id: str
+    question: str
+    expected_tools: list[str] = Field(default_factory=list)
+    expected_route: Optional[str] = None
+    expected_sources: list[str] = Field(default_factory=list)
+    expected_facts: list[str] = Field(default_factory=list)
+    expected_documents: list[str] = Field(default_factory=list)
+    difficulty: str = "medium"
+
+
 class RetrievalCandidate(BaseModel):
     document_id: str
     chunk_id: str
