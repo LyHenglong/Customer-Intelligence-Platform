@@ -91,6 +91,15 @@ class ChurnAnalysisResult(BaseModel):
     filters_applied: dict = Field(default_factory=dict)
 
 
+class SQLQueryResult(BaseModel):
+    sql: str = Field(..., description="The validated query actually executed")
+    columns: list[str]
+    rows: list[list]
+    row_count: int
+    truncated: bool = Field(..., description="True if more rows matched than SQL_ROW_LIMIT")
+    execution_time_ms: float
+
+
 class RetrainingAnalysisResult(BaseModel):
     current_model_version: Optional[str] = None
     previous_model_version: Optional[str] = None
