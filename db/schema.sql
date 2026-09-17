@@ -8,6 +8,11 @@ CREATE SCHEMA IF NOT EXISTS staging;
 CREATE SCHEMA IF NOT EXISTS intermediate;
 CREATE SCHEMA IF NOT EXISTS marts;
 
+-- Needed by public.rag_chunks below. Ships with the pgvector/pgvector
+-- Docker image used by docker-compose.yml's postgres service, and is
+-- available as an enable-able extension on Neon.
+CREATE EXTENSION IF NOT EXISTS vector;
+
 CREATE TABLE IF NOT EXISTS public.ingestion_log (
     batch_file      TEXT PRIMARY KEY,
     rows_loaded     INTEGER NOT NULL,
@@ -148,3 +153,24 @@ CREATE TABLE IF NOT EXISTS public.retrain_summaries (
     completion_tokens    INTEGER,
     created_at           TIMESTAMP NOT NULL DEFAULT now()
 );
+
+-- RAG knowledge corpus chunks (src/ai/rag/), one row per chunk produced by
+-- src/ai/rag/ingest.py from the documents under knowledge/. embedding is
+-- 384-dim to match the default local embedding model
+-- (sentence-transformers/all-MiniLM-L6-v2 - see src/ai/rag/embeddings.py).
+-- Also created on demand by vector_store.ensure_table() so the module
+-- works against a warehouse that predates this file.
+CREATE TABLE IF NOT EXISTS public.rag_chunks (
+    chunk_id      TEXT PRIMARY KEY,
+    document_id   TEXT NOT NULL,
+    title         TEXT NOT NULL,
+    source        TEXT NOT NULL,
+    section       TEXT,
+    page          INTEGER,
+    text          TEXT NOT NULL,
+    metadata      JSONB NOT NULL DEFAULT '{}'::jsonb,
+    embedding     VECTOR(384),
+    created_at    TIMESTAMP NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_rag_chunks_document_id ON public.rag_chunks (document_id);

@@ -47,6 +47,25 @@ shap==0.46.0
 # compatible client, pointed at Groq's API (fast, generous free tier).
 groq==1.7.0
 
+# AI assistant RAG layer (src/ai/rag/). sentence-transformers (local
+# embedding + cross-encoder reranking models, no external API key) is
+# deliberately NOT in requirements-streamlit-cloud.txt or
+# docker/requirements-airflow.txt: it pulls in PyTorch, and only the API
+# service (docker-compose's "serving" profile) embeds a live query at
+# request time - the dashboard never does, and ingestion (a one-off,
+# Docker/local command - python -m src.ai.rag.ingest) isn't part of
+# either trimmed environment's runtime path either.
+sentence-transformers==3.3.1
+# BM25 sparse retrieval, fused with vector search in
+# src/ai/rag/hybrid_search.py. Pure Python, no heavy transitive deps -
+# unlike sentence-transformers, safe to add to the trimmed environments
+# too if a future stage needs it there.
+rank-bm25==0.2.2
+# psycopg2 adapter for Postgres's vector type (src/ai/rag/vector_store.py) -
+# lets embeddings be passed/read as plain arrays instead of hand-formatting
+# pgvector's text literal syntax.
+pgvector==0.3.6
+
 # Orchestration client (kaggle download + env)
 kaggle==1.6.17
 python-dotenv==1.0.1
