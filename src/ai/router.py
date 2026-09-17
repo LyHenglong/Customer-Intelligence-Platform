@@ -29,7 +29,7 @@ _SQL_KEYWORDS = (
     "which customers", "segment", "breakdown", "group by", "total", "revenue",
 )
 _ML_KEYWORDS = (
-    "churn probability", "risk factor", "shap", "why is", "why did",
+    "churn probability", "risk factor", "risk factors", "shap", "why is", "why did",
     "predicted", "at risk", "explain why", "risky", "likely to churn",
     "recommend", "recommendation",
 )
@@ -40,13 +40,26 @@ _RAG_KEYWORDS = (
 )
 
 
+def _keyword_pattern(keywords: tuple[str, ...]) -> re.Pattern:
+    # \b-bounded, not a bare substring check: "rate" as a plain `in` test
+    # matches inside "strategy" (st-RATE-gy), "count" inside "discount",
+    # etc. - real false positives this project's own eval dataset caught
+    # (see tests/test_ai_evaluation_datasets.py's router-agreement test).
+    return re.compile(r"\b(?:" + "|".join(re.escape(kw) for kw in keywords) + r")\b")
+
+
+_SQL_PATTERN = _keyword_pattern(_SQL_KEYWORDS)
+_ML_PATTERN = _keyword_pattern(_ML_KEYWORDS)
+_RAG_PATTERN = _keyword_pattern(_RAG_KEYWORDS)
+
+
 def _extract_customer_id(query: str) -> str | None:
     m = _CUSTOMER_ID_RE.search(query)
     return m.group(0).upper() if m else None
 
 
-def _matches_any(text: str, keywords: tuple[str, ...]) -> bool:
-    return any(kw in text for kw in keywords)
+def _matches_any(text: str, pattern: re.Pattern) -> bool:
+    return bool(pattern.search(text))
 
 
 def classify_with_signals(query: str) -> tuple[str, dict]:
@@ -58,9 +71,9 @@ def classify_with_signals(query: str) -> tuple[str, dict]:
     customer_id = _extract_customer_id(query or "")
     signals = {
         "has_customer_id": customer_id is not None,
-        "has_sql": _matches_any(text, _SQL_KEYWORDS),
-        "has_ml": _matches_any(text, _ML_KEYWORDS),
-        "has_rag": _matches_any(text, _RAG_KEYWORDS),
+        "has_sql": _matches_any(text, _SQL_PATTERN),
+        "has_ml": _matches_any(text, _ML_PATTERN),
+        "has_rag": _matches_any(text, _RAG_PATTERN),
         "customer_id": customer_id,
     }
 
