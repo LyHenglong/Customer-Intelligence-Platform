@@ -9,6 +9,15 @@ RUN apt-get update \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
 
+# CPU-only torch build, installed before requirements.txt: sentence-
+# transformers (src/ai/rag/embeddings.py, .../reranker.py) depends on
+# torch but doesn't pin which build, so a plain `pip install -r
+# requirements.txt` resolves PyPI's default wheel - which bundles full
+# CUDA support (multiple GB) even though this container has no GPU and
+# never uses one. Installing the CPU-only wheel first (~200MB) satisfies
+# that dependency before pip ever considers the CUDA build.
+RUN pip install --no-cache-dir torch --index-url https://download.pytorch.org/whl/cpu
+
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
