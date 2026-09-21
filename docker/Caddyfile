@@ -1,0 +1,20 @@
+# Reverse proxy + automatic TLS (Let's Encrypt via ACME) for self-hosting
+# this stack outside Render, which already provides TLS for free on its
+# own (see render.yaml's comment) - this file is only relevant if you're
+# running docker-compose directly on your own server/VM with a real
+# domain pointed at it. Caddy handles certificate issuance and renewal
+# automatically; nothing else to configure beyond DNS + the env vars
+# below.
+#
+# Requires two env vars (see .env.example): API_DOMAIN and
+# DASHBOARD_DOMAIN, each a real domain/subdomain with a DNS A record
+# already pointing at this host's public IP - Caddy's ACME challenge
+# needs that to succeed before it can issue a certificate.
+
+{$API_DOMAIN} {
+	reverse_proxy api:8000
+}
+
+{$DASHBOARD_DOMAIN} {
+	reverse_proxy dashboard:8501
+}

@@ -25,15 +25,32 @@ from airflow.operators.empty import EmptyOperator
 from airflow.utils.dates import days_ago
 from airflow.utils.trigger_rule import TriggerRule
 
+from src.monitoring.alerting import send_slack_alert
+
 log = logging.getLogger(__name__)
 
 DBT_DIR = "/opt/airflow/dbt"
 RETRAIN_EVERY_N_BATCHES = int(os.environ.get("RETRAIN_EVERY_N_BATCHES", "3"))
 
+
+def _alert_on_task_failure(context: dict) -> None:
+    """default_args callback: fires once a task has exhausted its retries
+    (see `retries`/`retry_delay` below), not on every individual attempt.
+    No-op (send_slack_alert returns False, nothing raised) unless
+    SLACK_WEBHOOK_URL is set - see src/monitoring/alerting.py."""
+    task_instance = context["task_instance"]
+    send_slack_alert(
+        f":x: *Airflow task failed* - `{task_instance.dag_id}.{task_instance.task_id}` "
+        f"(run {context['run_id']}) after exhausting retries. "
+        f"Log: {task_instance.log_url}"
+    )
+
+
 default_args = {
     "owner": "telecom_churn_platform",
     "retries": 2,
     "retry_delay": timedelta(minutes=1),
+    "on_failure_callback": _alert_on_task_failure,
 }
 
 

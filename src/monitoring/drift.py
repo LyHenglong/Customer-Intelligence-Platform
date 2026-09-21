@@ -43,6 +43,7 @@ from typing import Iterable, Optional
 import numpy as np
 import pandas as pd
 
+from src.monitoring.alerting import send_slack_alert
 from src.warehouse import get_pg_conn, stream_query
 
 log = logging.getLogger(__name__)
@@ -330,6 +331,14 @@ def detect_drift_for_batch(current_batch: str, reference_batch: Optional[str] = 
         len(results),
         len(drifted),
     )
+
+    if drifted:
+        send_slack_alert(
+            f":warning: *Feature drift detected* - batch `{current_batch}` vs. "
+            f"baseline `{reference_batch}`: {len(drifted)} feature(s) at "
+            f"\"significant\" severity (max PSI {max_psi:.4f}): {', '.join(drifted)}"
+        )
+
     return {
         "reference_batch": reference_batch,
         "current_batch": current_batch,
