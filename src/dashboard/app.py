@@ -18,11 +18,9 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 import joblib
-import numpy as np
 import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
-import psycopg2
 import streamlit as st
 from dotenv import load_dotenv
 
@@ -66,22 +64,40 @@ if any(p.exists() for p in _secrets_paths):
     except Exception:
         pass
 
-from src.warehouse import stream_query  # noqa: E402
-from src.model.train_churn import ALL_FEATURES as CHURN_FEATURES  # noqa: E402
-from src.model.train_churn import CATEGORICAL_FEATURES as CHURN_CATEGORICAL  # noqa: E402
 from src.model.train_recommender import recommend_for_profile  # noqa: E402
 from src.model.train_recommender import SERVICE_COLUMNS as REC_SERVICE_COLUMNS  # noqa: E402
 from src.model.train_recommender import service_display_name  # noqa: E402
 from src.model.registry import resolve_model_path  # noqa: E402
 from src.model.explain_churn import compute_shap_details, format_risk_factors_text  # noqa: E402
+from src.model.dashboard_queries import (  # noqa: E402
+    MODELS_DIR,
+    TOTAL_SIMULATED_BATCHES,
+    RETRAIN_EVERY_N_BATCHES,
+    score_all_customers as _score_all_customers,
+    load_overall_stats as _load_overall_stats,
+    load_segment_rates as _load_segment_rates,
+    load_customers_by_id as _load_customers_by_id,
+    load_ingestion_log as _load_ingestion_log,
+    load_latest_drift as _load_latest_drift,
+    load_all_churn_metadata as _load_all_churn_metadata,
+    column_importances,
+)
 from src.agents.groq_client import AgentCallFailed  # noqa: E402
 from src.agents.explanation_agent import explain_churn as ai_explain_churn  # noqa: E402
 from src.agents.outreach_agent import draft_outreach as ai_draft_outreach  # noqa: E402
 from src.agents.cache import get_or_generate  # noqa: E402
 
-MODELS_DIR = Path(__file__).resolve().parents[2] / "models_store"
-RETRAIN_EVERY_N_BATCHES = int(os.environ.get("RETRAIN_EVERY_N_BATCHES", "3"))
-TOTAL_SIMULATED_BATCHES = 13
+# Re-wrapped with this process's own Streamlit caching (same TTLs as
+# before this was extracted to src/model/dashboard_queries.py, which the
+# new dashboard-facing API endpoints also import - single source of
+# truth for the SQL/scoring logic, each frontend keeps its own caching).
+score_all_customers = st.cache_data(ttl=600, show_spinner="Scoring customers...")(_score_all_customers)
+load_overall_stats = st.cache_data(ttl=600)(_load_overall_stats)
+load_segment_rates = st.cache_data(ttl=600)(_load_segment_rates)
+load_customers_by_id = st.cache_data(ttl=600)(_load_customers_by_id)
+load_ingestion_log = st.cache_data(ttl=300)(_load_ingestion_log)
+load_latest_drift = st.cache_data(ttl=300)(_load_latest_drift)
+load_all_churn_metadata = st.cache_data(ttl=300)(_load_all_churn_metadata)
 
 # AI Agent Layer (src/agents/): capped well below max_rows' up-to-500
 # customers. Each customer the first time costs a real Groq call (or two,
@@ -285,179 +301,6 @@ div[role="radiogroup"] label > div:first-child { display: none; }
 # each px.bar() call picking its own default colors.
 _CHART_COLORWAY = ["#a6790a", "#10192b", "#5b6577", "#c9a84c", "#8993a4", "#e8d3a0"]
 
-# signup_date deliberately excluded: not used anywhere in this dashboard,
-# and pulling a raw timestamp for 300K+ rows for nothing is pure memory
-# waste on a machine that's already tight (see README's RAM constraint).
-_DASHBOARD_COLUMNS = [c for c in ["customer_id"] + CHURN_FEATURES + [
-    "churn", "contract", "tenure", "monthlycharges", "tenure_bucket", "total_active_services",
-] if c != "signup_date"]
-_DASHBOARD_COLUMNS = list(dict.fromkeys(_DASHBOARD_COLUMNS))  # de-dupe, keep order
-
-
-def get_pg_conn():
-    return psycopg2.connect(
-        host=os.environ.get("POSTGRES_HOST", "localhost"),
-        port=os.environ.get("POSTGRES_PORT", "5432"),
-        dbname=os.environ.get("POSTGRES_DB", "warehouse"),
-        user=os.environ.get("POSTGRES_USER"),
-        password=os.environ.get("POSTGRES_PASSWORD"),
-        # See src/warehouse.py's get_pg_conn for why "prefer": lets this
-        # same code reach both the local Docker Postgres (no SSL) and a
-        # hosted provider like Neon (SSL required).
-        sslmode=os.environ.get("POSTGRES_SSLMODE", "prefer"),
-    )
-
-
-@st.cache_data(ttl=600, show_spinner="Scoring customers...")
-def score_all_customers(_churn_artifact, churn_version: str, batch_size: int = 25_000) -> pd.DataFrame:
-    """One streaming pass over customer_360, scoring every customer and
-    keeping only a compact per-customer result.
-
-    The dashboard used to load the entire mart into a DataFrame and score
-    it in place. That is fine at 300K rows and fatal at 1M: the frame alone
-    is ~620MB, and the preprocessor materializes a dense (n x 54) float64
-    matrix on top of it (412MB at 1M). Inside a 1GB container that is an
-    OOM kill.
-
-    Instead, rows are streamed from Postgres in batches, scored, and
-    reduced immediately to three columns. Batches are kept small (25K) on
-    purpose: each fetchmany materializes batch_rows x n_columns individual
-    Python objects before pandas builds columnar arrays, so the batch size
-    sets the transient peak far more than the retained result does. The retained result is ~40MB at
-    1M customers regardless of how wide the mart gets, and peak memory is
-    bounded by one batch rather than by the table size. Full rows for the
-    handful of customers actually displayed are fetched by id later.
-    """
-    score_cols = ["customer_id"] + CHURN_FEATURES
-    score_cols = list(dict.fromkeys(score_cols))
-    pipeline = _churn_artifact["pipeline"]
-
-    ids, scores, charges = [], [], []
-
-    def _score_batch(batch: pd.DataFrame) -> pd.DataFrame:
-        X = batch[CHURN_FEATURES].copy()
-        for c in CHURN_FEATURES:
-            if X[c].dtype == bool:
-                X[c] = X[c].astype(float)
-        ids.append(batch["customer_id"].to_numpy())
-        scores.append(pipeline.predict_proba(X)[:, 1].astype(np.float32))
-        charges.append(batch["monthlycharges"].to_numpy(dtype=np.float32))
-        # Return an empty frame: stream_query concatenates whatever comes
-        # back, and we deliberately keep none of the raw rows.
-        return batch.iloc[0:0]
-
-    stream_query(
-        f"SELECT {', '.join(score_cols)} FROM marts.customer_360",
-        columns=score_cols,
-        batch_rows=batch_size,
-        transform=_score_batch,
-    )
-
-    return pd.DataFrame({
-        "customer_id": np.concatenate(ids),
-        "churn_probability": np.concatenate(scores),
-        "monthlycharges": np.concatenate(charges),
-    })
-
-
-@st.cache_data(ttl=600)
-def load_overall_stats() -> dict:
-    """Headline counts straight from SQL - exact, and a few bytes over the
-    wire instead of a million rows."""
-    conn = get_pg_conn()
-    try:
-        with conn.cursor() as cur:
-            cur.execute("SELECT COUNT(*), AVG(churn::int) FROM marts.customer_360")
-            total, churn_rate = cur.fetchone()
-        return {"total_customers": int(total), "churn_rate": float(churn_rate)}
-    finally:
-        conn.close()
-
-
-@st.cache_data(ttl=600)
-def load_segment_rates(column: str) -> pd.DataFrame:
-    """Churn rate by segment, computed as a SQL GROUP BY.
-
-    Postgres aggregates a million rows far more cheaply than shipping them
-    all to pandas to do the same thing, and the result is a handful of rows.
-    """
-    if column not in set(CHURN_CATEGORICAL) | {"total_active_services"}:
-        raise ValueError(f"unexpected segment column {column!r}")  # guards the f-string below
-    conn = get_pg_conn()
-    try:
-        with conn.cursor() as cur:
-            cur.execute(
-                f"SELECT {column}::text, AVG(churn::int), COUNT(*) "
-                f"FROM marts.customer_360 GROUP BY {column} ORDER BY {column}"
-            )
-            rows = cur.fetchall()
-        return pd.DataFrame(rows, columns=[column, "churn_rate", "n_customers"]).astype(
-            {"churn_rate": float, "n_customers": int}
-        )
-    finally:
-        conn.close()
-
-
-@st.cache_data(ttl=600)
-def load_customers_by_id(customer_ids: tuple[str, ...]) -> pd.DataFrame:
-    """Full rows for just the customers being displayed."""
-    if not customer_ids:
-        return pd.DataFrame(columns=_DASHBOARD_COLUMNS)
-    conn = get_pg_conn()
-    try:
-        with conn.cursor() as cur:
-            cur.execute(
-                f"SELECT {', '.join(_DASHBOARD_COLUMNS)} FROM marts.customer_360 "
-                f"WHERE customer_id = ANY(%s)",
-                (list(customer_ids),),
-            )
-            rows = cur.fetchall()
-        return pd.DataFrame(rows, columns=_DASHBOARD_COLUMNS)
-    finally:
-        conn.close()
-
-
-@st.cache_data(ttl=300)
-def load_ingestion_log() -> pd.DataFrame:
-    conn = get_pg_conn()
-    try:
-        return pd.read_sql(
-            "SELECT batch_file, rows_loaded, loaded_at, status FROM ingestion_log ORDER BY loaded_at", conn
-        )
-    finally:
-        conn.close()
-
-
-@st.cache_data(ttl=300)
-def load_latest_drift() -> pd.DataFrame:
-    """Per-feature PSI for the most recently scored batch.
-
-    Returns an empty frame (rather than raising) when the table doesn't
-    exist yet - a warehouse that hasn't run the drift task since this
-    feature was added is a normal state, not an error worth breaking the
-    whole view over.
-    """
-    conn = get_pg_conn()
-    try:
-        with conn.cursor() as cur:
-            cur.execute("SELECT to_regclass('public.feature_drift')")
-            if cur.fetchone()[0] is None:
-                return pd.DataFrame()
-        return pd.read_sql(
-            """
-            SELECT feature, feature_type, psi, severity, reference_batch, current_batch
-              FROM public.feature_drift
-             WHERE current_batch = (
-                   SELECT current_batch FROM public.feature_drift
-                    ORDER BY computed_at DESC LIMIT 1
-             )
-             ORDER BY psi DESC
-            """,
-            conn,
-        )
-    finally:
-        conn.close()
-
 
 @st.cache_resource
 def load_latest_artifact(pattern: str):
@@ -469,46 +312,6 @@ def load_latest_artifact(pattern: str):
     if path is None:
         return None, None
     return joblib.load(path), path.stem
-
-
-@st.cache_data(ttl=300)
-def load_all_churn_metadata() -> list[dict]:
-    """All churn_model_*.json metadata files, oldest to newest - lets the
-    Model Performance tab show a real retraining trend, not just the
-    latest snapshot."""
-    records = []
-    for path in sorted(MODELS_DIR.glob("churn_model_*.json")):
-        try:
-            records.append(json.loads(path.read_text()))
-        except (json.JSONDecodeError, OSError):
-            continue
-    return records
-
-
-def column_importances(pipeline) -> dict:
-    """Maps the preprocessor's expanded output names (e.g.
-    'num__num_complaints', 'cat__contract_two_year') back to real
-    customer_360 column names, so risk-factor labels are meaningful
-    instead of truncated prefixes like 'num'/'cat'."""
-    try:
-        preproc = pipeline.named_steps["preprocess"]
-        clf = pipeline.named_steps["model"]
-        names = preproc.get_feature_names_out()
-        raw_importances = clf.feature_importances_
-    except (KeyError, AttributeError):
-        return {}
-
-    grouped: dict[str, float] = {}
-    for name, imp in zip(names, raw_importances):
-        if name.startswith("num__"):
-            col = name[len("num__"):]
-        elif name.startswith("cat__"):
-            rest = name[len("cat__"):]
-            col = next((c for c in CHURN_CATEGORICAL if rest.startswith(c + "_")), rest)
-        else:
-            col = name
-        grouped[col] = grouped.get(col, 0.0) + float(imp)
-    return grouped
 
 
 def compact_currency(value: float) -> str:
