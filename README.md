@@ -145,7 +145,8 @@ customer_360 (one row per customer: demographics, account, services,
 │   │   ├── evaluate_recommender.py # leave-one-out offline evaluation vs. popularity/random baselines
 │   │   ├── explain_churn.py       # shared per-customer SHAP logic (dashboard + /explain-churn both call this)
 │   │   ├── threshold_analysis.py  # expected-value threshold selection (cost/benefit model)
-│   │   └── api.py                 # FastAPI app: /predict-churn, /recommend, /explain-churn
+│   │   ├── dashboard_queries.py   # warehouse/filesystem reads shared by app.py and api.py's dashboard endpoints
+│   │   └── api.py                 # FastAPI app: predictions, dashboard-facing REST endpoints, AI assistant
 │   ├── monitoring/
 │   │   └── drift.py               # PSI drift detection between batches (see Drift monitoring)
 │   ├── agents/                    # AI Agent Layer - presentation only, see AI Agent Layer
@@ -156,6 +157,10 @@ customer_360 (one row per customer: demographics, account, services,
 │   │   └── cache.py               # Postgres-backed cache, keyed by customer + agent + model version
 │   └── dashboard/
 │       └── app.py                 # Streamlit dashboard, reads customer_360 directly
+├── frontend/                       # Next.js frontend - primary production UI, talks to api.py's REST endpoints
+│   ├── app/                        # App Router pages: overview, at-risk, customers, segments, model-performance, pipeline-status, assistant
+│   ├── components/                 # KpiCard, ChurnBarChart, ShapFactorList, etc.
+│   └── lib/                        # api-client.ts (typed fetch per endpoint), types.ts
 ├── dbt/
 │   ├── models/
 │   │   ├── staging/                # 5 models: demographics, account, services, usage, churn
@@ -189,6 +194,9 @@ customer_360 (one row per customer: demographics, account, services,
 │   ├── Dockerfile.airflow
 │   ├── Dockerfile.api
 │   ├── Dockerfile.dashboard
+│   ├── Dockerfile.frontend
+│   ├── Dockerfile.mlflow
+│   ├── Caddyfile                   # self-hosted TLS (see Production hardening)
 │   ├── requirements-airflow.txt
 │   └── init-multi-db.sh
 ├── scripts/
@@ -430,13 +438,20 @@ python -m src.model.train_recommender
 ### 5. Serve
 
 ```bash
-docker compose --profile serving up -d api dashboard
+docker compose --profile serving up -d api dashboard frontend
 ```
 
 - API docs: http://localhost:8000/docs
-- Dashboard: http://localhost:8501
+- Dashboard (Streamlit): http://localhost:8501
+- Frontend (Next.js): http://localhost:3000
 
-`api` and `dashboard` are behind Docker Compose's `serving` profile, so a plain `docker compose up` (warehouse + orchestration only) doesn't also pay for two more containers you may not be actively using — deliberate, given the RAM constraint.
+`api`, `dashboard`, and `frontend` are behind Docker Compose's `serving` profile, so a plain `docker compose up` (warehouse + orchestration only) doesn't also pay for three more containers you may not be actively using — deliberate, given the RAM constraint. The Next.js app under [`frontend/`](frontend/) is the primary production UI going forward — same warehouse, same models, but through `api`'s dashboard-facing REST endpoints (`/overview/*`, `/at-risk`, `/customers`, `/pipeline-status`, `/model-history`) instead of reading Postgres directly. It adds two things the Streamlit dashboard never had: a searchable customer list (`/customers`) and a per-customer detail page (`/customers/[id]`). The Streamlit dashboard stays exactly as it was — additive, not replaced — and remains the app actually deployed to the public demo in step 6 below.
+
+To run the frontend outside Docker for local development (hot reload):
+
+```bash
+cd frontend && npm install && cp .env.local.example .env.local && npm run dev
+```
 
 ### 6. Public demo deployment (optional)
 
@@ -457,20 +472,24 @@ The dashboard can run on **Streamlit Community Cloud** (free) against a hosted *
 
 **On first-load speed:** the dashboard was run for real against this live Neon database and rendered all 1,000,000 customers correctly, but took several minutes to do so from this development machine specifically - see [Verified state](#verified-state) for the measured numbers and why Streamlit Cloud's own (US-based) infrastructure is likely to see meaningfully better latency to Neon's US regions than this measurement reflects.
 
-### 7. Making the AI Assistant tab work on the public demo (optional)
+### 7. Deploying the API and the Next.js frontend to Render (optional)
 
-**Not deployed as part of this repo — the steps below are instructions, not a record of something already done.** Streamlit Community Cloud runs only the dashboard process; it has no way to also run a second, separate service alongside it. That means the deployment in step 6 has no FastAPI service to call, so its AI Assistant tab shows the honest "not available in this lightweight public demo" message (`src/dashboard/app.py`'s `AI_API_URL` check) instead of failing silently. To make that tab work there too, the API needs to run somewhere with its own public URL, and the dashboard's `AI_API_URL` secret needs to point at it.
+**Not deployed as part of this repo — the steps below are instructions, not a record of something already done.** Two things this unlocks:
 
-[`render.yaml`](render.yaml) is a ready-to-use [Render Blueprint](https://render.com/docs/blueprint-spec) for exactly this — it deploys `docker/Dockerfile.api` as its own standalone web service. Render was picked over alternatives (Fly.io, Railway) mainly because its free tier needs no credit card and supports Dockerfile-based web services directly, matching this repo's existing Docker-first approach rather than needing a second, non-Docker build path.
+- **The Streamlit dashboard's AI Assistant tab.** Streamlit Community Cloud runs only the dashboard process, with no way to also run a second, separate service alongside it — so the deployment in step 6 has no FastAPI service to call, and its AI Assistant tab shows the honest "not available in this lightweight public demo" message (`src/dashboard/app.py`'s `AI_API_URL` check) instead of failing silently.
+- **A public deployment of the Next.js frontend itself** (`frontend/`, step 5) — the primary production UI, which needs both a reachable API and its own hosting.
 
-1. **Create a [Render](https://render.com) account**, then **New → Blueprint**, and point it at this GitHub repo — Render reads `render.yaml` from the repo root automatically.
-2. **Fill in the env vars** Render prompts for (`POSTGRES_HOST/DB/USER/PASSWORD`) with the **same Neon project** used for the dashboard deploy in step 6, so both surfaces read the same warehouse. `GROQ_API_KEY` is optional, same caveat as step 5 (a public visitor could trigger real calls against your own Groq quota).
-3. **Copy the deployed service's URL** (Render shows it after the first successful deploy, something like `https://telecom-churn-api.onrender.com`).
-4. **Add `AI_API_URL`** to the Streamlit Cloud app's Secrets (step 6.5), set to that URL.
+[`render.yaml`](render.yaml) is a ready-to-use [Render Blueprint](https://render.com/docs/blueprint-spec) that deploys both: `docker/Dockerfile.api` and `docker/Dockerfile.frontend` as two standalone web services. Render was picked over alternatives (Fly.io, Railway, Vercel for the frontend) mainly to keep one platform for both services, with a free tier that needs no credit card and supports Dockerfile-based web services directly — matching this repo's existing Docker-first approach rather than needing a second, non-Docker build path for the frontend.
+
+1. **Create a [Render](https://render.com) account**, then **New → Blueprint**, and point it at this GitHub repo — Render reads `render.yaml` from the repo root automatically and creates both services.
+2. **Fill in `telecom-churn-api`'s env vars** Render prompts for (`POSTGRES_HOST/DB/USER/PASSWORD`) with the **same Neon project** used for the dashboard deploy in step 6, so both surfaces read the same warehouse. `GROQ_API_KEY` is optional, same caveat as step 5 (a public visitor could trigger real calls against your own Groq quota). Leave `CORS_ALLOWED_ORIGINS` and `telecom-churn-frontend`'s `NEXT_PUBLIC_API_URL` on their placeholder for now — neither service's real URL exists yet.
+3. **Copy each deployed service's URL** (Render shows these after the first successful deploy — something like `https://telecom-churn-api.onrender.com` and `https://telecom-churn-frontend.onrender.com`).
+4. **Set `CORS_ALLOWED_ORIGINS`** on `telecom-churn-api` to the frontend's URL, and **`NEXT_PUBLIC_API_URL`** on `telecom-churn-frontend` to the API's URL, then **manually redeploy `telecom-churn-frontend` specifically** — `NEXT_PUBLIC_API_URL` is inlined into the browser bundle at build time (see `docker/Dockerfile.frontend`'s comment), so an env var update alone doesn't take effect until the next build.
+5. **(Optional) Add `AI_API_URL`** to the Streamlit Cloud app's Secrets (step 6.5), set to the API's URL, to also light up the Streamlit dashboard's AI Assistant tab.
 
 Two things worth knowing before relying on this:
-- **Free-tier cold starts**: Render's free web services spin down after ~15 minutes idle; the first request after that pays a 10-50s cold-start delay to spin back up. Expected behavior on the free plan, not a bug — a visitor's first AI Assistant query after a quiet period will just be slow, not broken.
-- **No MLflow alongside it**: this deployment has no `mlflow` service reachable from it, so `src/model/registry.py` falls back to the glob-latest-by-timestamp artifact already baked into the Docker image at build time — correct, and by design (see that module's own docstring), but it does mean this deployment always serves whatever was newest in `models_store/` at the image's last build, not a live-promoted model.
+- **Free-tier cold starts**: Render's free web services spin down after ~15 minutes idle; the first request after that pays a 10-50s cold-start delay to spin back up. Expected behavior on the free plan, not a bug — a visitor's first request after a quiet period will just be slow, not broken.
+- **No MLflow alongside the API**: this deployment has no `mlflow` service reachable from it, so `src/model/registry.py` falls back to the glob-latest-by-timestamp artifact already baked into the Docker image at build time — correct, and by design (see that module's own docstring), but it does mean this deployment always serves whatever was newest in `models_store/` at the image's last build, not a live-promoted model.
 
 ### dbt directly
 
@@ -502,7 +521,7 @@ pytest tests/ -v
 
 Everything below is real, working configuration and code - not aspirational. None of it requires provisioning a new paid service to be useful; each piece degrades gracefully to "off" if its optional env var is unset, same convention as the AI Agent Layer and the model registry above.
 
-**TLS.** Automatic and free wherever this project actually deploys: Render (the API, see step 7 above) and Streamlit Community Cloud (the dashboard, step 6) both terminate TLS at their own edge - no certificate config needed for either. [`docker/Caddyfile`](docker/Caddyfile) + the `caddy` service (`docker compose --profile production up -d caddy`) covers the one case those don't: self-hosting this stack directly on your own server with a real domain. Needs `API_DOMAIN`/`DASHBOARD_DOMAIN` set to real DNS A records pointing at the host - Caddy handles Let's Encrypt issuance and renewal automatically from there.
+**TLS.** Automatic and free wherever this project actually deploys: Render (the API and the Next.js frontend, see step 7 above) and Streamlit Community Cloud (the dashboard, step 6) all terminate TLS at their own edge - no certificate config needed for any of them. [`docker/Caddyfile`](docker/Caddyfile) + the `caddy` service (`docker compose --profile production up -d caddy`) covers the one case those don't: self-hosting this stack directly on your own server with a real domain. Needs `API_DOMAIN`/`DASHBOARD_DOMAIN`/`FRONTEND_DOMAIN` set to real DNS A records pointing at the host - Caddy handles Let's Encrypt issuance and renewal automatically from there.
 
 **Secrets.** No dedicated secrets-manager tool (Vault, Doppler, etc.) - deliberately, matching this project's existing "avoid unnecessary infrastructure" pattern (see the AI Customer Intelligence plan doc's own instruction to that effect, followed elsewhere for the same reason - e.g. no Redis, no separate queue). Every real deployment surface already has its own encrypted secret store: Render's env var UI (`sync: false` entries in `render.yaml` prompt for these rather than committing them), Streamlit Cloud's Secrets UI (`.streamlit/secrets.toml.example`), and locally, `.env` (gitignored, never committed - verified: `git log --all -- .env` shows nothing). Nothing in this repo hardcodes a credential; every `POSTGRES_PASSWORD`/`GROQ_API_KEY`/etc. is read from the environment (`os.environ.get(...)` throughout, e.g. `src/warehouse.py`).
 

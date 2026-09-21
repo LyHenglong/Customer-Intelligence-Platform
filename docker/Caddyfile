@@ -6,10 +6,14 @@
 # automatically; nothing else to configure beyond DNS + the env vars
 # below.
 #
-# Requires two env vars (see .env.example): API_DOMAIN and
-# DASHBOARD_DOMAIN, each a real domain/subdomain with a DNS A record
-# already pointing at this host's public IP - Caddy's ACME challenge
-# needs that to succeed before it can issue a certificate.
+# Requires the env vars below (see .env.example), each a real domain/
+# subdomain with a DNS A record already pointing at this host's public
+# IP - Caddy's ACME challenge needs that to succeed before it can issue
+# a certificate. FRONTEND_DOMAIN is optional - only self-hosting the
+# Next.js frontend (rather than Render) needs it; if set, remember
+# NEXT_PUBLIC_API_URL must also be rebuilt to point at API_DOMAIN's
+# https:// URL, not localhost (build-time-inlined, see
+# docker/Dockerfile.frontend's comment).
 
 {$API_DOMAIN} {
 	reverse_proxy api:8000
@@ -17,4 +21,8 @@
 
 {$DASHBOARD_DOMAIN} {
 	reverse_proxy dashboard:8501
+}
+
+{$FRONTEND_DOMAIN} {
+	reverse_proxy frontend:3000
 }

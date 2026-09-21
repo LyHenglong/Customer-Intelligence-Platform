@@ -229,6 +229,14 @@ services:
       # Model registry (src/model/registry.py) - best-effort, same
       # fallback-to-glob-latest behavior as everywhere else this is set.
       MLFLOW_TRACKING_URI: http://mlflow:5000
+      # The frontend service's browser-facing origin(s), comma-separated -
+      # a browser fetch from a different port is a different origin, so
+      # this is required for the frontend to reach this API at all, not
+      # just a hardening nicety. Unset -> CORSMiddleware allows nothing,
+      # a safe default for a still-unauthenticated API - see
+      # src/model/api.py's own comment on why this is read at import
+      # time (restart needed on change).
+      CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-http://localhost:3000}
     depends_on:
       - postgres
       - mlflow
@@ -310,6 +318,32 @@ services:
     # README's RAM rationale), so it isn't raised further than this.
     mem_limit: 2048m
 
+  frontend:
+    # The Next.js frontend (frontend/) - the primary production UI going
+    # forward, talking to the api service's dashboard-facing REST
+    # endpoints instead of Postgres/the filesystem directly (see
+    # src/model/dashboard_queries.py + api.py's new endpoints). The
+    # Streamlit dashboard above stays as-is, unaffected - additive, not a
+    # replacement.
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.frontend
+      args:
+        # Consumed by the BROWSER at build time, not this container at
+        # runtime - unlike AI_API_URL above (server-to-server, resolves
+        # "api" via the compose network fine), this must be a URL the
+        # end user's own browser can actually reach. "http://api:8000"
+        # here would silently resolve to nothing outside the compose
+        # network and break every page - see docker/Dockerfile.frontend
+        # and lib/api-client.ts's comments.
+        NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:8000}
+    ports:
+      - "3000:3000"
+    depends_on:
+      - api
+    profiles: ["serving"]
+    mem_limit: 512m
+
   caddy:
     # TLS termination + reverse proxy for self-hosting this stack outside
     # Render (which already provides TLS for free on its own - see
@@ -321,6 +355,7 @@ services:
     environment:
       API_DOMAIN: ${API_DOMAIN:-}
       DASHBOARD_DOMAIN: ${DASHBOARD_DOMAIN:-}
+      FRONTEND_DOMAIN: ${FRONTEND_DOMAIN:-}
     ports:
       - "80:80"
       - "443:443"
@@ -331,6 +366,7 @@ services:
     depends_on:
       - api
       - dashboard
+      - frontend
     profiles: ["production"]
     mem_limit: 128m
 

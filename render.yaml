@@ -64,3 +64,35 @@ services:
       # glob-latest-by-timestamp (baked into the Docker image's
       # models_store/) already handles that correctly - see
       # src/model/registry.py's own docstring.
+      #
+      # The frontend service's public URL below, once known (see that
+      # service's own comment) - a browser fetch from a different origin
+      # needs this or every request from telecom-churn-frontend gets
+      # rejected. sync: false since it's genuinely unknown until the
+      # frontend service exists.
+      - key: CORS_ALLOWED_ORIGINS
+        sync: false
+
+  - type: web
+    name: telecom-churn-frontend
+    # The Next.js frontend (frontend/) - see README's "Deploying the API
+    # and the Next.js frontend to Render" section for why this and the
+    # API above exist as their own Render services rather than
+    # everything running as one process (Streamlit Cloud, which hosts
+    # the dashboard, can't also run a second service alongside it).
+    runtime: docker
+    dockerfilePath: ./docker/Dockerfile.frontend
+    dockerContext: .
+    plan: free
+    envVars:
+      # Render passes a Docker-runtime service's envVars as build args
+      # too, not just at runtime - which is what this actually needs,
+      # since NEXT_PUBLIC_API_URL is inlined into the browser bundle at
+      # BUILD time (see docker/Dockerfile.frontend's comment). Bootstrap
+      # order: create this service once first (any placeholder value),
+      # note the api service's real public URL once it exists, set this
+      # to that URL, then trigger a manual redeploy of *this* service
+      # specifically - a plain env var update alone won't re-inline a
+      # build-time value into the already-built bundle.
+      - key: NEXT_PUBLIC_API_URL
+        sync: false
