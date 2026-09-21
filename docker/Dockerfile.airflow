@@ -10,6 +10,10 @@ RUN apt-get update \
 
 USER airflow
 COPY docker/requirements-airflow.txt /tmp/requirements-airflow.txt
-RUN pip install --no-cache-dir -r /tmp/requirements-airflow.txt
+# --default-timeout=300 --retries 15: pip's default 15s per-read socket
+# timeout is too aggressive for a slow-but-working connection - see
+# docker/Dockerfile.api's comment for the real ReadTimeoutError this
+# was found from.
+RUN pip install --no-cache-dir --default-timeout=300 --retries 15 -r /tmp/requirements-airflow.txt
 
 # dbt project lives on a mounted volume at /opt/airflow/dbt (see docker-compose.yml)

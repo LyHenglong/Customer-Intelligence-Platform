@@ -1,0 +1,26 @@
+# Keeps the Docker build context small and builds reproducible - none of
+# these are COPY'd by any Dockerfile under docker/, so sending them to the
+# daemon only slows builds and (for .venv/.git) can be sizeable. See
+# docker/Dockerfile.api / .dashboard / .airflow / .mlflow for what actually
+# gets copied into images (models_store/ and knowledge/ are NOT excluded
+# here - both are explicitly COPY'd).
+
+.venv/
+.git/
+.github/
+data/
+logs/
+report/
+notebooks/
+tests/
+docs/
+dbt/target/
+dbt/dbt_packages/
+__pycache__/
+*.pyc
+.pytest_cache/
+.ipynb_checkpoints/
+*.md
+.env
+*.env
+kaggle.json

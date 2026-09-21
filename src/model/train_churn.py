@@ -23,11 +23,25 @@ import logging
 import os
 
 os.environ.setdefault("LOKY_MAX_CPU_COUNT", str(os.cpu_count() or 4))
+# mlflow prints a run-summary line containing an emoji on run-context exit
+# (e.g. "View run ... at ..."). Windows' console defaults to a codepage
+# that can't encode it, raising UnicodeEncodeError from inside mlflow's
+# own code - harmless (caught by the try/except around the mlflow.* calls
+# below regardless), but it misleadingly logs as "registration failed"
+# even though registration already succeeded. PYTHONIOENCODING only takes
+# effect at interpreter startup (too late to set from within the running
+# process), so reconfigure the already-open streams directly instead.
+import sys
+
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8", errors="backslashreplace")
+    sys.stderr.reconfigure(encoding="utf-8", errors="backslashreplace")
 
 from datetime import datetime, timezone
 from pathlib import Path
 
 import joblib
+import mlflow
 import numpy as np
 import pandas as pd
 import psycopg2
@@ -84,6 +98,26 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(me
 log = logging.getLogger("train_churn")
 
 MODELS_DIR = Path(__file__).resolve().parents[2] / "models_store"
+
+# Model registry (src/model/registry.py). Best-effort: unset when running
+# outside Docker/without an mlflow service, in which case training behaves
+# exactly as before this was added - see the try/except around the
+# mlflow.* calls in train_and_save() below.
+MLFLOW_TRACKING_URI = os.environ.get("MLFLOW_TRACKING_URI")
+# mlflow's own default (MLFLOW_HTTP_REQUEST_TIMEOUT) is 120s - too long for
+# calls that must never block a retrain (see src/model/registry.py's same
+# setdefault, where a real hang was reproduced with the 120s default).
+# 30s here (vs. registry.py's 5s) because this path uploads the joblib
+# artifact itself, not just a lookup. setdefault: respects an operator's
+# own explicit value.
+os.environ.setdefault("MLFLOW_HTTP_REQUEST_TIMEOUT", "30")
+# mlflow's default retry count (5, with exponential backoff) can compound
+# a single unreachable-mlflow case into minutes of retries even with the
+# timeout above capped - reproduced for real while verifying
+# src/model/registry.py's fallback path. 2 retries is enough to ride out
+# a brief blip without meaningfully delaying a retrain that otherwise
+# succeeded regardless of whether this registration step does.
+os.environ.setdefault("MLFLOW_HTTP_REQUEST_MAX_RETRIES", "2")
 
 NUMERIC_FEATURES = [
     "age", "annual_income", "dependents", "tenure", "tenure_years",
@@ -356,6 +390,45 @@ def train_and_save(df: pd.DataFrame | None = None) -> dict:
 
     log.info("Saved model to %s", model_path)
     log.info("Saved metadata to %s", meta_path)
+
+    # Registry bookkeeping (src/model/registry.py) - a side channel, never
+    # a training-blocking dependency. The joblib file above is already
+    # saved and is the real serving artifact regardless of whether any of
+    # this succeeds; an unreachable/misconfigured MLflow must not fail a
+    # retrain that otherwise succeeded.
+    if MLFLOW_TRACKING_URI:
+        try:
+            mlflow.set_tracking_uri(MLFLOW_TRACKING_URI)
+            mlflow.set_experiment("churn_model")
+            with mlflow.start_run(run_name=version):
+                mlflow.log_params({
+                    "target_recall": TARGET_RECALL,
+                    "max_training_rows": MAX_TRAINING_ROWS,
+                    "calibration_method": "sigmoid",
+                })
+                mlflow.log_metrics({
+                    k: v for k, v in metadata.items()
+                    if isinstance(v, (int, float)) and not isinstance(v, bool)
+                })
+                mlflow.log_artifact(str(model_path))
+                mlflow.log_artifact(str(meta_path))
+                run_id = mlflow.active_run().info.run_id
+                mv = mlflow.register_model(f"runs:/{run_id}/{model_path.name}", "churn_model")
+                client = mlflow.tracking.MlflowClient()
+                client.set_model_version_tag("churn_model", mv.version, "model_file", model_path.name)
+                # Promotion gate: reuse the recall floor already computed
+                # above - do not build a new multi-metric comparison system.
+                if metadata["recall_churn"] >= TARGET_RECALL:
+                    client.set_registered_model_alias("churn_model", "champion", mv.version)
+                    log.info("Registered churn_model v%s as champion", mv.version)
+                else:
+                    log.info(
+                        "Registered churn_model v%s (not aliased champion: recall %.3f < target %.2f)",
+                        mv.version, metadata["recall_churn"], TARGET_RECALL,
+                    )
+        except Exception as exc:
+            log.warning("MLflow logging/registration failed (training itself succeeded): %s", exc)
+
     return metadata
 
 

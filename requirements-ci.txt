@@ -37,3 +37,9 @@ pytest==8.3.3
 httpx==0.27.2
 rank-bm25==0.2.2
 pgvector==0.3.6
+# train_churn.py/train_recommender.py import mlflow at module level (see
+# src/model/registry.py) - needed just to import those modules, even
+# though tests/test_model_registry.py mocks mlflow.tracking.MlflowClient
+# rather than hitting a real server. mlflow-skinny, not full mlflow: no
+# SQLAlchemy/server/UI deps, same reasoning as requirements-airflow.txt.
+mlflow-skinny==2.18.0

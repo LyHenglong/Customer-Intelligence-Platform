@@ -35,6 +35,7 @@ from pydantic import BaseModel, Field
 
 from src.model.train_churn import ALL_FEATURES as CHURN_FEATURES
 from src.model.train_churn import ID_COL as CHURN_ID_COL
+from src.model.registry import resolve_model_path
 from src.warehouse import get_pg_conn
 from src.model.train_recommender import recommend_for_customer, recommend_for_profile
 from src.model.train_recommender import PROFILE_NUMERIC as REC_PROFILE_NUMERIC
@@ -60,14 +61,9 @@ app = FastAPI(title="Telecom Churn & Recommendation API", version="1.0.0")
 _state: dict = {"churn": None, "churn_version": None, "recommender": None, "recommender_version": None}
 
 
-def _latest(pattern: str) -> Optional[Path]:
-    matches = sorted(MODELS_DIR.glob(pattern))
-    return matches[-1] if matches else None
-
-
 @app.on_event("startup")
 def load_models() -> None:
-    churn_path = _latest("churn_model_*.joblib")
+    churn_path = resolve_model_path("churn_model", "churn_model_*.joblib")
     if churn_path:
         _state["churn"] = joblib.load(churn_path)
         _state["churn_version"] = churn_path.stem.replace("churn_model_", "")
@@ -75,7 +71,7 @@ def load_models() -> None:
     else:
         log.warning("No churn model artifact found in %s", MODELS_DIR)
 
-    rec_path = _latest("recommender_*.joblib")
+    rec_path = resolve_model_path("recommender", "recommender_*.joblib")
     if rec_path:
         _state["recommender"] = joblib.load(rec_path)
         _state["recommender_version"] = rec_path.stem.replace("recommender_", "")

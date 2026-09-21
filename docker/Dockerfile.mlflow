@@ -1,0 +1,26 @@
+# Minimal dedicated image, not the stock ghcr.io/mlflow/mlflow image: that
+# image doesn't bundle psycopg2 (needed for the Postgres backend store),
+# and pulling in a whole second unrelated image family for one extra
+# package adds inconsistency for no benefit over reusing this project's
+# own python:3.11-slim pattern (see docker/Dockerfile.api, .dashboard).
+FROM python:3.11-slim
+
+# Full mlflow (not mlflow-skinny) here specifically because this image
+# runs `mlflow server` itself, which needs the SQLAlchemy-based backend
+# store support skinny deliberately excludes. Everywhere else that only
+# needs the tracking/registry *client* (training scripts, src/model/
+# registry.py) installs mlflow-skinny instead - see docker/requirements-
+# airflow.txt's comment on why pulling SQLAlchemy into the Airflow image
+# is a real, previously-hit incident (it force-upgraded Airflow's own
+# bundled version and broke its TaskInstance ORM mapping); mlflow-skinny
+# has no SQLAlchemy dependency, only plain mlflow does.
+#
+# Pinned exactly (2.18.0), matching the mlflow-skinny client pin
+# everywhere else - an unpinned server talking to a differently-pinned
+# client risks REST API/schema drift.
+RUN pip install --no-cache-dir --default-timeout=300 --retries 15 \
+    mlflow==2.18.0 psycopg2-binary==2.9.12
+
+EXPOSE 5000
+HEALTHCHECK --interval=15s --timeout=10s --start-period=15s --retries=5 \
+    CMD python -c "import urllib.request; urllib.request.urlopen('http://localhost:5000/health', timeout=5)" || exit 1

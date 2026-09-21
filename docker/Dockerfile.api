@@ -16,10 +16,21 @@ RUN apt-get update \
 # CUDA support (multiple GB) even though this container has no GPU and
 # never uses one. Installing the CPU-only wheel first (~200MB) satisfies
 # that dependency before pip ever considers the CUDA build.
-RUN pip install --no-cache-dir torch --index-url https://download.pytorch.org/whl/cpu
+#
+# --default-timeout=300 --retries 15 on both installs: pip's default
+# per-read socket timeout is 15s, which a real build hit on this network's
+# intermittent stalls (ReadTimeoutError against files.pythonhosted.org
+# mid-download - the download was progressing, just paused longer than a
+# short timeout tolerates, on an otherwise-working connection). A longer
+# timeout plus more retries makes the build resilient to that instead of
+# failing outright on one delayed chunk. Confirmed via a real build that
+# even 100s/10 retries wasn't always enough - this network's stalls are
+# occasionally longer than that.
+RUN pip install --no-cache-dir --default-timeout=300 --retries 15 \
+    torch --index-url https://download.pytorch.org/whl/cpu
 
 COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+RUN pip install --no-cache-dir --default-timeout=300 --retries 15 -r requirements.txt
 
 COPY src/__init__.py /app/src/__init__.py
 COPY src/warehouse.py /app/src/warehouse.py
@@ -29,5 +40,12 @@ COPY src/ai /app/src/ai
 COPY models_store /app/models_store
 COPY knowledge /app/knowledge
 
+# Non-root: api.py only ever reads models_store (never writes), so no
+# host-side chmod/chown is needed on that bind mount for this user to work.
+RUN useradd --create-home --uid 1000 appuser && chown -R appuser:appuser /app
+USER appuser
+
 EXPOSE 8000
+HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \
+    CMD python -c "import urllib.request; urllib.request.urlopen('http://localhost:8000/health', timeout=3)" || exit 1
 CMD ["uvicorn", "src.model.api:app", "--host", "0.0.0.0", "--port", "8000"]

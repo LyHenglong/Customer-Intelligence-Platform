@@ -28,3 +28,10 @@ dill==0.3.1.1
 # task (summarize_retrain), so the scheduler needs this even though it
 # doesn't need shap (that's dashboard/API only, for per-customer SHAP).
 groq==1.7.0
+# Model registry/tracking client (retrain_churn_model/retrain_recommender
+# tasks log to MLflow) - mlflow-skinny specifically, NOT full mlflow: full
+# mlflow depends on SQLAlchemy, and this file's own comment above already
+# documents a real incident where pinning a different SQLAlchemy version
+# force-upgraded Airflow's bundled one and broke its TaskInstance ORM
+# mapping. mlflow-skinny has no SQLAlchemy dependency at all.
+mlflow-skinny==2.18.0

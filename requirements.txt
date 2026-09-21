@@ -66,6 +66,16 @@ rank-bm25==0.2.2
 # pgvector's text literal syntax.
 pgvector==0.3.6
 
+# Model registry/tracking client (src/model/registry.py, train_churn.py,
+# train_recommender.py) - mlflow-skinny, not full mlflow: it has the same
+# tracking/registry client API (MlflowClient, log_params/metrics/artifact,
+# register_model) without pulling in SQLAlchemy, the server, the UI, or
+# Docker/gunicorn - none of which any client-side caller here needs. Only
+# docker/Dockerfile.mlflow (which runs `mlflow server` itself) needs full
+# mlflow. Keep this pin identical to that Dockerfile's - a client talking
+# to a differently-pinned server risks REST API/schema drift.
+mlflow-skinny==2.18.0
+
 # Orchestration client (kaggle download + env)
 kaggle==1.6.17
 python-dotenv==1.0.1
