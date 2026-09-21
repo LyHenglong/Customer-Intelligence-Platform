@@ -3,8 +3,10 @@ FROM apache/airflow:2.10.3-python3.11
 USER root
 # libgomp1: LightGBM's native library dlopen()s libgomp.so.1 (GNU OpenMP)
 # at import time; not guaranteed present without an explicit install.
+# postgresql-client: pg_dump, used by dags/backup_warehouse.py - not
+# bundled in the base image.
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends build-essential libgomp1 \
+    && apt-get install -y --no-install-recommends build-essential libgomp1 postgresql-client \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
 

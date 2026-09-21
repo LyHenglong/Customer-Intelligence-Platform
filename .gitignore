@@ -20,6 +20,11 @@ models_store/*.json
 # bookkeeping copies of the same artifacts already excluded above.
 mlflow_artifacts/
 
+# Postgres backup dumps (dags/backup_warehouse.py) - regenerated daily,
+# never versioned (and would contain real customer data).
+backups/*.sql.gz
+!backups/.gitkeep
+
 # Python
 __pycache__/
 *.pyc

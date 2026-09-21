@@ -17,6 +17,20 @@
 # point these at the same Neon project used for the Streamlit Cloud
 # dashboard deploy (see README step 6), so both surfaces read the same
 # warehouse.
+#
+# Horizontal scaling (`numInstances` below, commented out): verified
+# api.py is safe to run as multiple replicas before enabling this - it
+# writes nothing to local disk at request time (grepped for it: no
+# .write_text/.to_csv/.dump outside models_store, which is read-only at
+# runtime), and everything that IS persisted (ai_traces, the LLM
+# explanation cache, drift results) already goes to the shared Postgres
+# database, not local state. `numInstances` > 1 requires a paid plan -
+# Render's free tier is capped at one instance with no autoscaling.
+# TLS: automatic on Render for every plan (including free), terminated
+# at their edge - no separate certificate/reverse-proxy config needed
+# for this deployment path specifically (see docker-compose.yml's new
+# `caddy` service for the self-hosted-outside-Render case, which has no
+# such platform-provided TLS).
 
 services:
   - type: web
@@ -25,6 +39,8 @@ services:
     dockerfilePath: ./docker/Dockerfile.api
     dockerContext: .
     plan: free
+    # numInstances: 3   # uncomment on a paid plan for real horizontal
+                         # scaling behind Render's built-in load balancer
     healthCheckPath: /health
     envVars:
       - key: POSTGRES_HOST

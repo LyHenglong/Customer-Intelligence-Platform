@@ -36,6 +36,10 @@ x-airflow-common: &airflow-common
     # Optional - see the README's "AI Agent Layer" section for the
     # fallback behavior when this is unset or Groq is unreachable.
     GROQ_API_KEY: ${GROQ_API_KEY:-}
+    # Drift/task-failure alerting (src/monitoring/alerting.py). Optional -
+    # unset means send_slack_alert() is a no-op, same fallback convention
+    # as GROQ_API_KEY above.
+    SLACK_WEBHOOK_URL: ${SLACK_WEBHOOK_URL:-}
     # so `from src.ingest.batch_loader import ...` resolves inside DAG
     # task code - /opt/airflow isn't on sys.path by default.
     PYTHONPATH: /opt/airflow
@@ -51,6 +55,9 @@ x-airflow-common: &airflow-common
     # mounted (not baked into the image) so those files land on the host
     # alongside report/findings.md, visible outside the container.
     - ./report:/opt/airflow/report
+    # dags/backup_warehouse.py's pg_dump output - mounted (not baked into
+    # the image) so backups survive a container rebuild/recreate.
+    - ./backups:/opt/airflow/backups
   user: "${AIRFLOW_UID:-50000}:0"
   depends_on:
     postgres:
@@ -284,5 +291,31 @@ services:
     # README's RAM rationale), so it isn't raised further than this.
     mem_limit: 2048m
 
+  caddy:
+    # TLS termination + reverse proxy for self-hosting this stack outside
+    # Render (which already provides TLS for free on its own - see
+    # render.yaml). Only relevant with a real domain's DNS pointed at this
+    # host; not useful for local dev (see docker/Caddyfile). A separate
+    # "production" profile, not "serving": local/dev use of api+dashboard
+    # never needs this, only a real self-hosted deployment does.
+    image: caddy:2-alpine
+    environment:
+      API_DOMAIN: ${API_DOMAIN:-}
+      DASHBOARD_DOMAIN: ${DASHBOARD_DOMAIN:-}
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./docker/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - api
+      - dashboard
+    profiles: ["production"]
+    mem_limit: 128m
+
 volumes:
   pgdata:
+  caddy_data:
+  caddy_config:
