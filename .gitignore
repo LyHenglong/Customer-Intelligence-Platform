@@ -16,6 +16,10 @@ models_store/*.joblib
 models_store/*.json
 !models_store/.gitkeep
 
+# MLflow artifact store (docker-compose's mlflow service bind mount) -
+# bookkeeping copies of the same artifacts already excluded above.
+mlflow_artifacts/
+
 # Python
 __pycache__/
 *.pyc

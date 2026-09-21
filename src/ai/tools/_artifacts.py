@@ -1,9 +1,11 @@
-"""Shared, cached loader for the latest churn/recommender joblib artifacts.
+"""Shared, cached loader for the current churn/recommender joblib artifacts.
 
-Mirrors src/model/api.py's load_models()/_latest() glob-by-timestamp
-pattern and src/dashboard/app.py's load_latest_artifact() - a third
-process (this AI tool layer) needs the same artifacts, so this factors
-the pattern into one place rather than a third copy.
+Mirrors src/model/api.py's load_models() and src/dashboard/app.py's
+load_latest_artifact() - a third process (this AI tool layer) needs the
+same artifacts, so this factors the pattern into one place rather than a
+third copy. Resolution itself (MLflow "champion" alias, falling back to
+glob-latest-by-timestamp) lives in src/model/registry.py, shared by all
+three call sites.
 """
 
 from __future__ import annotations
@@ -14,17 +16,14 @@ from typing import Optional
 
 import joblib
 
+from src.model.registry import resolve_model_path
+
 MODELS_DIR = Path(__file__).resolve().parents[3] / "models_store"
-
-
-def _latest_path(pattern: str) -> Optional[Path]:
-    matches = sorted(MODELS_DIR.glob(pattern))
-    return matches[-1] if matches else None
 
 
 @lru_cache(maxsize=1)
 def load_churn_artifact() -> tuple[Optional[dict], Optional[str]]:
-    path = _latest_path("churn_model_*.joblib")
+    path = resolve_model_path("churn_model", "churn_model_*.joblib", models_dir=MODELS_DIR)
     if path is None:
         return None, None
     return joblib.load(path), path.stem.replace("churn_model_", "")
@@ -32,7 +31,7 @@ def load_churn_artifact() -> tuple[Optional[dict], Optional[str]]:
 
 @lru_cache(maxsize=1)
 def load_recommender_artifact() -> tuple[Optional[dict], Optional[str]]:
-    path = _latest_path("recommender_*.joblib")
+    path = resolve_model_path("recommender", "recommender_*.joblib", models_dir=MODELS_DIR)
     if path is None:
         return None, None
     return joblib.load(path), path.stem.replace("recommender_", "")

@@ -26,3 +26,10 @@ plotly==5.24.1
 shap==0.46.0
 groq==1.7.0
 python-dotenv==1.0.1
+# Model registry client (src/model/registry.py, called by the dashboard's
+# model loader) - mlflow-skinny, not full mlflow: no SQLAlchemy/server/UI
+# deps, just the tracking/registry client API. On Streamlit Cloud
+# MLFLOW_TRACKING_URI is simply unset (no mlflow service there, same as
+# AI_API_URL), so this import is present but never actually reaches a
+# server - registry.py falls back to the existing glob-latest behavior.
+mlflow-skinny==2.18.0

@@ -72,6 +72,7 @@ from src.model.train_churn import CATEGORICAL_FEATURES as CHURN_CATEGORICAL  # n
 from src.model.train_recommender import recommend_for_profile  # noqa: E402
 from src.model.train_recommender import SERVICE_COLUMNS as REC_SERVICE_COLUMNS  # noqa: E402
 from src.model.train_recommender import service_display_name  # noqa: E402
+from src.model.registry import resolve_model_path  # noqa: E402
 from src.model.explain_churn import compute_shap_details, format_risk_factors_text  # noqa: E402
 from src.agents.groq_client import AgentCallFailed  # noqa: E402
 from src.agents.explanation_agent import explain_churn as ai_explain_churn  # noqa: E402
@@ -460,10 +461,13 @@ def load_latest_drift() -> pd.DataFrame:
 
 @st.cache_resource
 def load_latest_artifact(pattern: str):
-    matches = sorted(MODELS_DIR.glob(pattern))
-    if not matches:
+    # registered_name derived from pattern ("churn_model_*.joblib" ->
+    # "churn_model", "recommender_*.joblib" -> "recommender") - the only
+    # two patterns this is ever called with (see call sites below).
+    registered_name = pattern.split("_*.")[0]
+    path = resolve_model_path(registered_name, pattern, models_dir=MODELS_DIR)
+    if path is None:
         return None, None
-    path = matches[-1]
     return joblib.load(path), path.stem
 
 

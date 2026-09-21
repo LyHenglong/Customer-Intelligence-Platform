@@ -26,6 +26,12 @@ x-airflow-common: &airflow-common
     POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
     DBT_PROFILES_DIR: /opt/airflow/dbt
     RETRAIN_EVERY_N_BATCHES: ${RETRAIN_EVERY_N_BATCHES}
+    # Model registry/tracking (src/model/registry.py, train_churn.py,
+    # train_recommender.py) - best-effort: if mlflow isn't reachable when
+    # a retrain task runs, training still succeeds exactly as before, just
+    # without registry bookkeeping for that run (see registry.py's
+    # fallback-to-glob-latest behavior).
+    MLFLOW_TRACKING_URI: http://mlflow:5000
     # AI Agent Layer (src/agents/): read by the summarize_retrain task.
     # Optional - see the README's "AI Agent Layer" section for the
     # fallback behavior when this is unset or Groq is unreachable.
@@ -65,6 +71,7 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
       POSTGRES_DB: ${POSTGRES_DB}
       AIRFLOW_DB: ${AIRFLOW_DB}
+      MLFLOW_DB: ${MLFLOW_DB}
     ports:
       # Host port 5433, not 5432: this machine already runs a native
       # Windows PostgreSQL service on 5432, which silently intercepts
@@ -82,6 +89,61 @@ services:
       interval: 5s
       timeout: 5s
       retries: 10
+    mem_limit: 512m
+
+  mlflow:
+    # Model registry/tracking server - closes the "no registry, newest-
+    # file-wins" gap (see src/model/registry.py). Backend store is a
+    # dedicated database on this SAME Postgres instance (created by
+    # docker/init-multi-db.sh, mirroring the AIRFLOW_DB precedent above),
+    # not SQLite - production-compatible and consistent with how the rest
+    # of this stack already treats Postgres as the one stateful service.
+    # Artifact store is a local bind mount, same convention as
+    # ./models_store - this is bookkeeping/provenance, not the file the
+    # api/dashboard actually load at runtime (that's still
+    # models_store/*.joblib, resolved by src/model/registry.py).
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.mlflow
+    # --backend-store-uri/--default-artifact-root are CLI-only flags for
+    # `mlflow server` (it does not read MLFLOW_BACKEND_STORE_URI from its
+    # own environment the way mlflow's *client* reads MLFLOW_TRACKING_URI),
+    # so the composed URL is interpolated directly into command: here -
+    # compose resolves ${...} in command: from top-level/.env vars
+    # (POSTGRES_USER/POSTGRES_PASSWORD/MLFLOW_DB, all defined in .env),
+    # the same interpolation AIRFLOW__DATABASE__SQL_ALCHEMY_CONN above
+    # already relies on. No raw DATABASE_URL stored in .env.
+    # --workers 2, not gunicorn's default of 4: this is a lightly-used
+    # internal registry service (a handful of requests per training run
+    # or process startup, never real traffic), and 4 workers under the
+    # mem_limit below was OOM-killed (exit 137) in practice.
+    command: >
+      mlflow server
+      --backend-store-uri postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${MLFLOW_DB}
+      --default-artifact-root /mlflow/artifacts
+      --workers 2
+      --host 0.0.0.0 --port 5000
+    ports:
+      # Host port 5001, not 5000: 5000 is commonly taken by other local
+      # services (e.g. macOS AirPlay). Internal container-to-container
+      # traffic (airflow, api, dashboard) still uses port 5000 on the
+      # "mlflow" service name.
+      - "5001:5000"
+    volumes:
+      - ./mlflow_artifacts:/mlflow/artifacts
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:5000/health', timeout=5)\" || exit 1"]
+      interval: 15s
+      timeout: 10s
+      retries: 5
+      start_period: 15s
+    # Raised from 300m after an observed OOM-kill (exit 137) under the
+    # default 4-worker gunicorn config - see the --workers 2 comment above,
+    # which addresses the actual cause; this is margin on top of that fix,
+    # not a replacement for it (same reasoning as postgres's mem_limit).
     mem_limit: 512m
 
   airflow-init:
@@ -134,6 +196,12 @@ services:
     # rows. Raised alongside the chunked-read and MAX_TRAINING_ROWS fixes in
     # train_churn.py - the code fixes do the real work; this is margin.
     mem_limit: 1600m
+    healthcheck:
+      test: ["CMD-SHELL", "airflow jobs check --job-type SchedulerJob --hostname \"$$HOSTNAME\" || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
 
   api:
     build:
@@ -151,8 +219,12 @@ services:
       # AI Agent Layer: read by /explain-churn. Optional - see the
       # README's "AI Agent Layer" section for the fallback behavior.
       GROQ_API_KEY: ${GROQ_API_KEY:-}
+      # Model registry (src/model/registry.py) - best-effort, same
+      # fallback-to-glob-latest behavior as everywhere else this is set.
+      MLFLOW_TRACKING_URI: http://mlflow:5000
     depends_on:
       - postgres
+      - mlflow
     ports:
       - "8000:8000"
     volumes:
@@ -186,6 +258,9 @@ services:
       # testing. `from src.model.train_churn import ...` needs /app on
       # the path explicitly.
       PYTHONPATH: /app
+      # Model registry (src/model/registry.py) - best-effort, same
+      # fallback-to-glob-latest behavior as everywhere else this is set.
+      MLFLOW_TRACKING_URI: http://mlflow:5000
     volumes:
       - ./models_store:/app/models_store
     ports:
@@ -193,6 +268,7 @@ services:
     depends_on:
       - postgres
       - api
+      - mlflow
     profiles: ["serving"]
     # Scoring 1,000,000 customers needs real headroom even after the
     # streaming redesign (see score_all_customers). On this 3.8GB Docker VM

@@ -23,10 +23,23 @@ import os
 # Silences a harmless joblib/loky warning on Windows, where physical-core
 # detection shells out to a command that isn't available in this environment.
 os.environ.setdefault("LOKY_MAX_CPU_COUNT", str(os.cpu_count() or 4))
+# mlflow prints a run-summary line containing an emoji on run-context exit.
+# Windows' console defaults to a codepage that can't encode it, raising
+# UnicodeEncodeError from inside mlflow's own code - harmless (caught by
+# the try/except around the mlflow.* calls below regardless), but it
+# misleadingly logs as "registration failed" even though registration
+# already succeeded (see src/model/train_churn.py's identical fix).
+import sys
+
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8", errors="backslashreplace")
+    sys.stderr.reconfigure(encoding="utf-8", errors="backslashreplace")
+
 from datetime import datetime, timezone
 from pathlib import Path
 
 import joblib
+import mlflow
 import numpy as np
 import pandas as pd
 import psycopg2
@@ -43,6 +56,23 @@ load_dotenv()
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 log = logging.getLogger("train_recommender")
+
+# Model registry (src/model/registry.py). Best-effort: unset when running
+# outside Docker/without an mlflow service, in which case training behaves
+# exactly as before this was added - see the try/except around the
+# mlflow.* calls in train_and_save() below.
+MLFLOW_TRACKING_URI = os.environ.get("MLFLOW_TRACKING_URI")
+# mlflow's own default (MLFLOW_HTTP_REQUEST_TIMEOUT) is 120s - too long for
+# calls that must never block a retrain (see src/model/registry.py's same
+# setdefault, where a real hang was reproduced with the 120s default).
+# 30s here (vs. registry.py's 5s) because this path uploads the joblib
+# artifact itself, not just a lookup. setdefault: respects an operator's
+# own explicit value.
+os.environ.setdefault("MLFLOW_HTTP_REQUEST_TIMEOUT", "30")
+# mlflow's default retry count (5, with exponential backoff) can compound
+# a single unreachable-mlflow case into minutes of retries even with the
+# timeout above capped - see src/model/train_churn.py's identical fix.
+os.environ.setdefault("MLFLOW_HTTP_REQUEST_MAX_RETRIES", "2")
 
 MODELS_DIR = Path(__file__).resolve().parents[2] / "models_store"
 
@@ -213,6 +243,31 @@ def train_and_save() -> dict:
 
     log.info("Saved recommender artifact to %s", artifact_path)
     log.info("Saved metadata to %s", meta_path)
+
+    # Registry bookkeeping (src/model/registry.py) - a side channel, never
+    # a training-blocking dependency; the joblib artifact above is already
+    # saved regardless of whether any of this succeeds. No quality-floor
+    # gate exists for the recommender today, so always alias the newest
+    # version as champion - matches today's implicit "newest wins"
+    # behavior exactly, rather than inventing a new gate not asked for.
+    if MLFLOW_TRACKING_URI:
+        try:
+            mlflow.set_tracking_uri(MLFLOW_TRACKING_URI)
+            mlflow.set_experiment("recommender")
+            with mlflow.start_run(run_name=version):
+                mlflow.log_params({"n_neighbors": k})
+                mlflow.log_metrics({"n_customers": metadata["n_customers"]})
+                mlflow.log_artifact(str(artifact_path))
+                mlflow.log_artifact(str(meta_path))
+                run_id = mlflow.active_run().info.run_id
+                mv = mlflow.register_model(f"runs:/{run_id}/{artifact_path.name}", "recommender")
+                client = mlflow.tracking.MlflowClient()
+                client.set_model_version_tag("recommender", mv.version, "model_file", artifact_path.name)
+                client.set_registered_model_alias("recommender", "champion", mv.version)
+                log.info("Registered recommender v%s as champion", mv.version)
+        except Exception as exc:
+            log.warning("MLflow logging/registration failed (training itself succeeded): %s", exc)
+
     return metadata
 
 

@@ -210,7 +210,7 @@ def _copy_rows(conn, rows: list[tuple], table: str, columns: list[str], batch_na
         )
 
 
-def load_batch(batch_path: Path) -> None:
+def load_batch(batch_path: Path, skip_raw: bool = False) -> None:
     log.info("Processing %s", batch_path.name)
     raw_rows, cleaned_rows, stats = process_batch(batch_path)
     log.info(
@@ -220,7 +220,8 @@ def load_batch(batch_path: Path) -> None:
 
     conn = get_pg_conn()
     try:
-        _copy_rows(conn, raw_rows, "public.raw_customers", RAW_COLUMNS, batch_path.name)
+        if not skip_raw:
+            _copy_rows(conn, raw_rows, "public.raw_customers", RAW_COLUMNS, batch_path.name)
         _copy_rows(conn, cleaned_rows, "public.customers_cleaned", CLEANED_COLUMNS, batch_path.name)
         with conn.cursor() as cur:
             cur.execute(
@@ -240,6 +241,12 @@ def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--batch", help="Explicit batch filename (e.g. batch_001.csv)")
     parser.add_argument("--all", action="store_true", help="Process all remaining unprocessed batches")
+    parser.add_argument(
+        "--skip-raw", action="store_true",
+        help="Don't write the raw_customers pass-through table (only customers_cleaned). "
+             "Useful for storage-capped hosts like Neon's free tier - raw_customers is an "
+             "audit copy not read by training/RAG/dashboard code.",
+    )
     args = parser.parse_args()
 
     conn = get_pg_conn()
@@ -263,7 +270,7 @@ def main() -> None:
         if not batch_path.exists():
             log.error("Batch file not found: %s", batch_path)
             sys.exit(1)
-        load_batch(batch_path)
+        load_batch(batch_path, skip_raw=args.skip_raw)
 
 
 if __name__ == "__main__":
