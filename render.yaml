@@ -1,0 +1,50 @@
+# Render Blueprint (https://render.com/docs/blueprint-spec) for the FastAPI
+# serving layer (src/model/api.py) - deploys docker/Dockerfile.api as a
+# standalone web service, reachable from anywhere, so the dashboard's AI
+# Decision Assistant tab has a backend to call even when the dashboard
+# itself is running on Streamlit Community Cloud (which has no way to also
+# run a second, separate service alongside it - see README's "Public demo
+# deployment" section for why that tab is otherwise unavailable there).
+#
+# Not auto-deployed by anything in this repo - a human connects this repo
+# on render.com (New -> Blueprint) and Render reads this file from there.
+# Free tier: the service spins down after ~15 minutes idle and the next
+# request pays a cold-start delay (10-50s) to spin back up - expected
+# behavior on the free plan, not a bug.
+#
+# Env vars marked `sync: false` are secrets/host-specific values Render
+# will prompt for at Blueprint creation time rather than auto-generating -
+# point these at the same Neon project used for the Streamlit Cloud
+# dashboard deploy (see README step 6), so both surfaces read the same
+# warehouse.
+
+services:
+  - type: web
+    name: telecom-churn-api
+    runtime: docker
+    dockerfilePath: ./docker/Dockerfile.api
+    dockerContext: .
+    plan: free
+    healthCheckPath: /health
+    envVars:
+      - key: POSTGRES_HOST
+        sync: false
+      - key: POSTGRES_PORT
+        value: "5432"
+      - key: POSTGRES_DB
+        sync: false
+      - key: POSTGRES_USER
+        sync: false
+      - key: POSTGRES_PASSWORD
+        sync: false
+      - key: POSTGRES_SSLMODE
+        value: require
+      # Optional - see README's "AI Agent Layer" section for the fallback
+      # behavior when unset (/explain-churn narrates raw SHAP instead).
+      - key: GROQ_API_KEY
+        sync: false
+      # Deliberately not set here: this deployment has no mlflow service
+      # alongside it, and src/model/registry.py's fallback to
+      # glob-latest-by-timestamp (baked into the Docker image's
+      # models_store/) already handles that correctly - see
+      # src/model/registry.py's own docstring.
