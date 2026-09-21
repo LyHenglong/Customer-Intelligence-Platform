@@ -457,6 +457,21 @@ The dashboard can run on **Streamlit Community Cloud** (free) against a hosted *
 
 **On first-load speed:** the dashboard was run for real against this live Neon database and rendered all 1,000,000 customers correctly, but took several minutes to do so from this development machine specifically - see [Verified state](#verified-state) for the measured numbers and why Streamlit Cloud's own (US-based) infrastructure is likely to see meaningfully better latency to Neon's US regions than this measurement reflects.
 
+### 7. Making the AI Assistant tab work on the public demo (optional)
+
+**Not deployed as part of this repo — the steps below are instructions, not a record of something already done.** Streamlit Community Cloud runs only the dashboard process; it has no way to also run a second, separate service alongside it. That means the deployment in step 6 has no FastAPI service to call, so its AI Assistant tab shows the honest "not available in this lightweight public demo" message (`src/dashboard/app.py`'s `AI_API_URL` check) instead of failing silently. To make that tab work there too, the API needs to run somewhere with its own public URL, and the dashboard's `AI_API_URL` secret needs to point at it.
+
+[`render.yaml`](render.yaml) is a ready-to-use [Render Blueprint](https://render.com/docs/blueprint-spec) for exactly this — it deploys `docker/Dockerfile.api` as its own standalone web service. Render was picked over alternatives (Fly.io, Railway) mainly because its free tier needs no credit card and supports Dockerfile-based web services directly, matching this repo's existing Docker-first approach rather than needing a second, non-Docker build path.
+
+1. **Create a [Render](https://render.com) account**, then **New → Blueprint**, and point it at this GitHub repo — Render reads `render.yaml` from the repo root automatically.
+2. **Fill in the env vars** Render prompts for (`POSTGRES_HOST/DB/USER/PASSWORD`) with the **same Neon project** used for the dashboard deploy in step 6, so both surfaces read the same warehouse. `GROQ_API_KEY` is optional, same caveat as step 5 (a public visitor could trigger real calls against your own Groq quota).
+3. **Copy the deployed service's URL** (Render shows it after the first successful deploy, something like `https://telecom-churn-api.onrender.com`).
+4. **Add `AI_API_URL`** to the Streamlit Cloud app's Secrets (step 6.5), set to that URL.
+
+Two things worth knowing before relying on this:
+- **Free-tier cold starts**: Render's free web services spin down after ~15 minutes idle; the first request after that pays a 10-50s cold-start delay to spin back up. Expected behavior on the free plan, not a bug — a visitor's first AI Assistant query after a quiet period will just be slow, not broken.
+- **No MLflow alongside it**: this deployment has no `mlflow` service reachable from it, so `src/model/registry.py` falls back to the glob-latest-by-timestamp artifact already baked into the Docker image at build time — correct, and by design (see that module's own docstring), but it does mean this deployment always serves whatever was newest in `models_store/` at the image's last build, not a live-promoted model.
+
 ### dbt directly
 
 ```bash
