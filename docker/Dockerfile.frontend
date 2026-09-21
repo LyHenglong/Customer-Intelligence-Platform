@@ -24,6 +24,16 @@ RUN npm run build
 FROM node:20-slim AS runner
 WORKDIR /app
 ENV NODE_ENV=production
+# Docker sets HOSTNAME inside every container to the container ID by
+# default, and Next.js's standalone server.js reads process.env.HOSTNAME
+# as its bind address - without this override it binds to that
+# container-ID-derived value (in practice, the container's own
+# bridge-network IP) instead of all interfaces. That made it reachable
+# from the host via Docker's port publishing (NAT works regardless of
+# which interface the process bound to) but refused every connection
+# made from *inside* the container itself - including HEALTHCHECK, which
+# runs `node -e "fetch('http://localhost:3000')..."` from inside.
+ENV HOSTNAME="0.0.0.0"
 
 # node:20-slim already ships a non-root "node" user at UID 1000 (that's
 # the whole reason official node images include one) - reuse it instead
