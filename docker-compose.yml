@@ -246,8 +246,17 @@ services:
     # actually had room for. 1536m was tried next and technically
     # survived, but peaked at 99.76% of that limit (measured via `docker
     # stats` mid-request) - too close to the edge for reliable repeat
-    # use. 2048m leaves real margin above that observed peak.
-    mem_limit: 2048m
+    # use. Raised again from 2048m after /overview/stats and /at-risk
+    # (dashboard_queries.score_all_customers, a full ~1M-row streaming
+    # pass - see src/model/api.py's _get_scored_customers) reproduced the
+    # same problem a second way: peaked at 99.96% of 2048m, and - unlike
+    # the RAG path - stayed pinned near 98% even after the request
+    # finished (CPython/pandas not returning freed batch memory to the
+    # OS after the streaming pass, not a leak - see
+    # score_all_customers's own docstring on why batch size, not the
+    # retained ~40MB result, sets the transient peak). 3072m leaves real
+    # margin above that observed *settled*, not just peak, usage.
+    mem_limit: 3072m
 
   dashboard:
     build:
