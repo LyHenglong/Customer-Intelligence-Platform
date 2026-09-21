@@ -237,7 +237,17 @@ services:
     volumes:
       - ./models_store:/app/models_store
     profiles: ["serving"]
-    mem_limit: 400m
+    # Raised from 400m after a real, reproduced OOM-kill (exit 137,
+    # OOMKilled=true) on the very first /assistant/query request - 400m
+    # covers the churn/recommender artifacts fine, but the RAG path
+    # (src/ai/rag/embeddings.py, .../reranker.py) additionally loads
+    # sentence-transformers + a torch runtime + a cross-encoder reranker
+    # model into the same process on first use, which 400m never
+    # actually had room for. 1536m was tried next and technically
+    # survived, but peaked at 99.76% of that limit (measured via `docker
+    # stats` mid-request) - too close to the edge for reliable repeat
+    # use. 2048m leaves real margin above that observed peak.
+    mem_limit: 2048m
 
   dashboard:
     build:
