@@ -29,9 +29,10 @@ jobs:
       matrix:
         # mlflow isn't included: it's a lightly-used internal registry
         # service (see docker-compose.yml's comment), never deployed
-        # standalone/scaled the way api/dashboard are - built locally by
-        # anyone running the stack, same as postgres's off-the-shelf image.
-        image: [api, dashboard]
+        # standalone/scaled the way api/dashboard/frontend are - built
+        # locally by anyone running the stack, same as postgres's
+        # off-the-shelf image.
+        image: [api, dashboard, frontend]
     steps:
       - uses: actions/checkout@v4
         with:
@@ -54,6 +55,15 @@ jobs:
           context: .
           file: docker/Dockerfile.${{ matrix.image }}
           push: true
+          # frontend only: NEXT_PUBLIC_API_URL is inlined into the browser
+          # bundle at build time (see docker/Dockerfile.frontend's own
+          # comment) and isn't known here, so this falls back to
+          # lib/api-client.ts's http://localhost:8000 default. Anyone
+          # self-hosting by pulling this published image with a real API
+          # URL needs to rebuild it themselves with their own
+          # --build-arg NEXT_PUBLIC_API_URL, same as Render/docker-compose
+          # already must - this publish step is not a usable end-to-end
+          # deploy artifact for frontend the way it is for api/dashboard.
           # Both a rolling `latest` and the immutable commit SHA - the SHA
           # tag is what makes a specific deploy reproducible/rollback-able;
           # `latest` is convenience for anyone just pulling the newest.
