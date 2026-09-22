@@ -51,10 +51,16 @@ def fake_churn_state(monkeypatch):
 
 
 def _scored_df():
+    """Mirrors what dashboard_queries.score_all_customers actually returns,
+    including the `category`-dtype segment columns that ride along with the
+    scores so /overview/revenue-at-risk-by-segment can group the whole
+    at-risk population without a per-row Postgres fetch."""
     return pd.DataFrame({
         "customer_id": ["CUST0001", "CUST0002", "CUST0003"],
         "churn_probability": [0.9, 0.5, 0.1],
         "monthlycharges": [80.0, 60.0, 40.0],
+        "contract": pd.Categorical(["month-to-month", "month-to-month", "two_year"]),
+        "tenure_bucket": pd.Categorical(["new_0_6mo", "loyal_24mo_plus", "loyal_24mo_plus"]),
     })
 
 
@@ -119,18 +125,49 @@ def test_overview_segment_rates_returns_buckets(monkeypatch):
 
 def test_revenue_at_risk_by_segment_groups_correctly(monkeypatch, fake_churn_state):
     monkeypatch.setattr(dashboard_queries, "score_all_customers", lambda *a, **kw: _scored_df())
-    full_rows = pd.DataFrame({
-        "customer_id": ["CUST0001", "CUST0002"],
-        "contract": ["month-to-month", "month-to-month"],
-    })
-    monkeypatch.setattr(dashboard_queries, "load_customers_by_id", lambda ids: full_rows)
 
     with TestClient(api_module.app) as client:
         response = client.get("/overview/revenue-at-risk-by-segment", params={"threshold": 0.3})
 
     assert response.status_code == 200
     body = response.json()
+    # CUST0003 (0.1) is below the threshold, so only the two
+    # month-to-month customers count: 80 + 60.
     assert body["buckets"] == [{"segment": "month-to-month", "revenue_at_risk": 140.0}]
+
+
+def test_revenue_at_risk_buckets_sum_to_the_overview_stats_headline(monkeypatch, fake_churn_state):
+    """Regression: these buckets used to be computed over only the top
+    `max_rows` (default 100) at-risk customers while /overview/stats
+    reported the full population, so the chart silently disagreed with
+    the KPI beside it by orders of magnitude at real data volumes."""
+    monkeypatch.setattr(dashboard_queries, "load_overall_stats", lambda: {"total_customers": 3, "churn_rate": 0.1})
+    monkeypatch.setattr(dashboard_queries, "score_all_customers", lambda *a, **kw: _scored_df())
+    monkeypatch.setattr(dashboard_queries, "load_all_churn_metadata", lambda: [{"roc_auc": 0.65}])
+    monkeypatch.setattr(dashboard_queries, "column_importances", lambda pipeline: {})
+
+    with TestClient(api_module.app) as client:
+        stats = client.get("/overview/stats", params={"threshold": 0.3}).json()
+        buckets = client.get("/overview/revenue-at-risk-by-segment", params={"threshold": 0.3}).json()["buckets"]
+
+    assert sum(b["revenue_at_risk"] for b in buckets) == pytest.approx(stats["revenue_at_risk"])
+
+
+def test_revenue_at_risk_by_segment_supports_other_segment_columns(monkeypatch, fake_churn_state):
+    monkeypatch.setattr(dashboard_queries, "score_all_customers", lambda *a, **kw: _scored_df())
+
+    with TestClient(api_module.app) as client:
+        response = client.get(
+            "/overview/revenue-at-risk-by-segment",
+            params={"threshold": 0.3, "segment_column": "tenure_bucket"},
+        )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["segment_column"] == "tenure_bucket"
+    assert {b["segment"]: b["revenue_at_risk"] for b in body["buckets"]} == {
+        "new_0_6mo": 80.0, "loyal_24mo_plus": 60.0,
+    }
 
 
 def test_revenue_at_risk_by_segment_rejects_bad_segment_column(fake_churn_state):

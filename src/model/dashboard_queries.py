@@ -44,20 +44,30 @@ def score_all_customers(_churn_artifact, churn_version: str, batch_size: int = 2
     kill.
 
     Instead, rows are streamed from Postgres in batches, scored, and
-    reduced immediately to three columns. Batches are kept small (25K) on
+    reduced immediately to a few columns. Batches are kept small (25K) on
     purpose: each fetchmany materializes batch_rows x n_columns individual
     Python objects before pandas builds columnar arrays, so the batch
     size sets the transient peak far more than the retained result does.
-    The retained result is ~40MB at 1M customers regardless of how wide
+    The retained result is ~45MB at 1M customers regardless of how wide
     the mart gets, and peak memory is bounded by one batch rather than by
     the table size. Full rows for the handful of customers actually
     displayed are fetched by id later (see load_customers_by_id).
+
+    The segment columns (CHURN_CATEGORICAL - contract, tenure_bucket,
+    gender, ...) are retained as pandas `category` dtype rather than
+    discarded: they're already being streamed here as model features, and
+    at <=6 distinct values each they cost ~1MB per column at 1M rows
+    (int8 codes + a tiny dictionary). That's what lets
+    /overview/revenue-at-risk-by-segment aggregate the *whole* at-risk
+    population in-process instead of re-fetching full rows from Postgres
+    for a capped subset.
     """
     score_cols = ["customer_id"] + CHURN_FEATURES
     score_cols = list(dict.fromkeys(score_cols))
     pipeline = _churn_artifact["pipeline"]
 
     ids, scores, charges = [], [], []
+    segments: dict[str, list] = {c: [] for c in CHURN_CATEGORICAL}
 
     def _score_batch(batch: pd.DataFrame) -> pd.DataFrame:
         X = batch[CHURN_FEATURES].copy()
@@ -67,6 +77,8 @@ def score_all_customers(_churn_artifact, churn_version: str, batch_size: int = 2
         ids.append(batch["customer_id"].to_numpy())
         scores.append(pipeline.predict_proba(X)[:, 1].astype(np.float32))
         charges.append(batch["monthlycharges"].to_numpy(dtype=np.float32))
+        for c in CHURN_CATEGORICAL:
+            segments[c].append(batch[c].to_numpy())
         # Return an empty frame: stream_query concatenates whatever comes
         # back, and we deliberately keep none of the raw rows.
         return batch.iloc[0:0]
@@ -78,11 +90,14 @@ def score_all_customers(_churn_artifact, churn_version: str, batch_size: int = 2
         transform=_score_batch,
     )
 
-    return pd.DataFrame({
+    frame = pd.DataFrame({
         "customer_id": np.concatenate(ids),
         "churn_probability": np.concatenate(scores),
         "monthlycharges": np.concatenate(charges),
     })
+    for c in CHURN_CATEGORICAL:
+        frame[c] = pd.Categorical(np.concatenate(segments[c]))
+    return frame
 
 
 def load_overall_stats() -> dict:

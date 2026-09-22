@@ -8,6 +8,12 @@ import KpiCard from "@/components/KpiCard";
 import LoadingState from "@/components/LoadingState";
 import ErrorState from "@/components/ErrorState";
 
+/** "20260909T073056Z" -> "09-09 07:30", so same-day retrains stay distinguishable. */
+function formatVersionTick(version: string) {
+  const m = /^(\d{4})(\d{2})(\d{2})T(\d{2})(\d{2})/.exec(version);
+  return m ? `${m[2]}-${m[3]} ${m[4]}:${m[5]}` : version;
+}
+
 function ConfusionMatrix({ matrix }: { matrix: number[][] }) {
   const labels = ["Retained", "Churned"];
   const max = Math.max(...matrix.flat());
@@ -69,8 +75,12 @@ export default function ModelPerformancePage() {
   if (history.length === 0) return <ErrorState message="No trained model versions found." />;
 
   const latest = history[history.length - 1];
+  // Full version as the category key, not a date-only slice: several
+  // retrains can land on the same day, and duplicate category keys make
+  // Recharts drop line segments between them (and render a row of
+  // identical axis ticks). formatVersionTick handles readability instead.
   const trend = history.map((h) => ({
-    version: h.version.slice(0, 8),
+    version: h.version,
     roc_auc: h.roc_auc ?? null,
     f1_churn: h.f1_churn ?? null,
   }));
@@ -115,7 +125,7 @@ export default function ModelPerformancePage() {
           <ResponsiveContainer width="100%" height={280}>
             <LineChart data={trend} margin={{ top: 8, right: 12, bottom: 8, left: 8 }}>
               <CartesianGrid strokeDasharray="3 3" stroke="var(--gridline)" />
-              <XAxis dataKey="version" tick={{ fill: "var(--text-muted)", fontSize: 11 }} axisLine={{ stroke: "var(--axis)" }} tickLine={false} />
+              <XAxis dataKey="version" tickFormatter={formatVersionTick} tick={{ fill: "var(--text-muted)", fontSize: 11 }} axisLine={{ stroke: "var(--axis)" }} tickLine={false} />
               <YAxis tick={{ fill: "var(--text-muted)", fontSize: 11 }} axisLine={{ stroke: "var(--axis)" }} tickLine={false} domain={[0, 1]} />
               <Tooltip contentStyle={{ background: "var(--surface-card)", border: "1px solid var(--border)", borderRadius: 6, fontSize: 12 }} />
               <Legend wrapperStyle={{ fontSize: 12, color: "var(--text-secondary)" }} />
