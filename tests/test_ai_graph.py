@@ -195,8 +195,18 @@ class TestMLAnalysisRoute:
         assert "feature_importances" in result.tools_used
         importance_evidence = [e for e in result.evidence if "weighs most heavily" in e.claim]
         assert len(importance_evidence) == 1
-        # Ranked most-important-first, so the model reads them in order.
-        assert importance_evidence[0].value.startswith("contract (importance 0.4000)")
+        # Ranked most-important-first and expressed as a share of total,
+        # not the raw split counts column_importances returns: 0.40 of
+        # (0.40 + 0.25 + 0.10) is 53.3%.
+        assert importance_evidence[0].value.startswith(
+            "contract (53.3% of total model importance)"
+        )
+
+
+    def test_feature_importances_are_skipped_when_the_model_reports_none(self, monkeypatch):
+        monkeypatch.setattr(graph_module, "load_churn_artifact", lambda: ({"pipeline": object()}, "V2"))
+        monkeypatch.setattr(graph_module, "column_importances", lambda pipeline: {})
+        assert graph_module._gather_feature_importance_evidence() == []
 
     def test_counting_questions_skip_feature_importances(self, monkeypatch):
         monkeypatch.setattr(graph_module, "churn_analysis", lambda filters=None: ChurnAnalysisResult(

@@ -206,11 +206,21 @@ def _gather_feature_importance_evidence(top_k: int = 6) -> list[Evidence]:
     if not importances:
         return []
 
+    # Normalized to a share of total importance rather than passed through
+    # raw: column_importances returns LightGBM's split counts (735.0, 699.0,
+    # ...), which carry no meaning outside the model and read as false
+    # precision in a business answer. A share is interpretable and still an
+    # exact string the grounding check can match. column_importances itself
+    # is left alone - the frontend's Overview page shares it.
+    total = sum(importances.values())
+    if total <= 0:
+        return []
+
     ranked = sorted(importances.items(), key=lambda kv: kv[1], reverse=True)[:top_k]
     return [Evidence(
         type="model", source=f"churn model {version}",
         claim="Features the churn model weighs most heavily, most important first",
-        value=", ".join(f"{col} (importance {imp:.4f})" for col, imp in ranked),
+        value=", ".join(f"{col} ({imp / total * 100:.1f}% of total model importance)" for col, imp in ranked),
     )]
 
 
