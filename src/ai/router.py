@@ -39,6 +39,23 @@ _RAG_KEYWORDS = (
     "retention strategy", "support tier",
 )
 
+# Natural-language phrasings -> the warehouse values churn_analysis accepts
+# (see src/ai/tools/churn_tool.py's _ALLOWED_FILTER_COLUMNS). Without this,
+# "why is churn increasing among month-to-month customers?" scored the whole
+# 1M-row population and answered with population-wide numbers, then correctly
+# but uselessly reported that the evidence said nothing about month-to-month.
+# Only the two filterable columns are covered on purpose - a phrase matching
+# some other column would produce a filter the tool rejects outright.
+_SEGMENT_PATTERNS: tuple[tuple[str, str, str], ...] = (
+    ("contract", "month_to_month", r"month[\s_-]?to[\s_-]?month|monthly contract|rolling contract"),
+    ("contract", "one_year", r"\bone[\s_-]?year\b|\b1[\s_-]?year\b|annual contract"),
+    ("contract", "two_year", r"\btwo[\s_-]?year\b|\b2[\s_-]?year\b|biennial"),
+    ("tenure_bucket", "new_0_6mo", r"\bnew customers?\b|newly signed|first six months|first 6 months"),
+    ("tenure_bucket", "established_6_24mo", r"\bestablished\b"),
+    ("tenure_bucket", "loyal_24mo_plus", r"\bloyal\b|long[\s_-]?tenured|long[\s_-]?standing"),
+)
+_SEGMENT_COMPILED = tuple((col, val, re.compile(rx)) for col, val, rx in _SEGMENT_PATTERNS)
+
 
 def _keyword_pattern(keywords: tuple[str, ...]) -> re.Pattern:
     # \b-bounded, not a bare substring check: "rate" as a plain `in` test
@@ -62,6 +79,16 @@ def _matches_any(text: str, pattern: re.Pattern) -> bool:
     return bool(pattern.search(text))
 
 
+def _extract_segment_filters(text: str) -> dict[str, str]:
+    """First match per column wins, so "month-to-month vs two-year" narrows
+    to month_to_month rather than producing a contradictory AND of both."""
+    filters: dict[str, str] = {}
+    for column, value, pattern in _SEGMENT_COMPILED:
+        if column not in filters and pattern.search(text):
+            filters[column] = value
+    return filters
+
+
 def classify_with_signals(query: str) -> tuple[str, dict]:
     """Returns (route, signals). signals carries the individual booleans
     that produced the route plus the extracted customer_id, so callers
@@ -75,6 +102,10 @@ def classify_with_signals(query: str) -> tuple[str, dict]:
         "has_ml": _matches_any(text, _ML_PATTERN),
         "has_rag": _matches_any(text, _RAG_PATTERN),
         "customer_id": customer_id,
+        # Deliberately not part of the route decision below - a segment
+        # phrase narrows the evidence a route gathers, it doesn't pick the
+        # route. "month-to-month customers" alone is still UNSUPPORTED.
+        "segment_filters": _extract_segment_filters(text),
     }
 
     if not text:

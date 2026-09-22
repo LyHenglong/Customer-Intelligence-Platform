@@ -331,6 +331,17 @@ class TestAggregateAnalysis:
 
 
 class TestChurnAnalysis:
+    @pytest.fixture(autouse=True)
+    def _clear_churn_cache(self):
+        """churn_analysis memoizes for 10 minutes (a full 1M-row scoring
+        pass is far too expensive to repeat per request), which would
+        otherwise leak one test's result into the next."""
+        from src.ai.tools import churn_tool
+
+        churn_tool.clear_cache()
+        yield
+        churn_tool.clear_cache()
+
     def test_unfiltered_population_stats(self, monkeypatch, customers_df):
         from src.ai.tools import churn_tool
 
@@ -347,6 +358,43 @@ class TestChurnAnalysis:
 
         with pytest.raises(ValueError):
             churn_tool.churn_analysis(filters={"not_a_real_column": "x"})
+
+    def test_repeat_calls_are_served_from_cache(self, monkeypatch, customers_df):
+        """A full scoring pass measured 50-120s against the real warehouse,
+        and it used to be paid again on every ML_ANALYSIS question."""
+        from src.ai.tools import churn_tool
+
+        calls = []
+        underlying = _fake_stream_query(customers_df)
+
+        def _counting_stream_query(*args, **kwargs):
+            calls.append(1)
+            return underlying(*args, **kwargs)
+
+        monkeypatch.setattr(churn_tool, "stream_query", _counting_stream_query)
+
+        first = churn_tool.churn_analysis()
+        second = churn_tool.churn_analysis()
+
+        assert len(calls) == 1
+        assert first == second
+
+    def test_different_filters_cache_independently(self, monkeypatch, customers_df):
+        from src.ai.tools import churn_tool
+
+        calls = []
+        underlying = _fake_stream_query(customers_df)
+
+        def _counting_stream_query(*args, **kwargs):
+            calls.append(1)
+            return underlying(*args, **kwargs)
+
+        monkeypatch.setattr(churn_tool, "stream_query", _counting_stream_query)
+
+        churn_tool.churn_analysis()
+        churn_tool.churn_analysis(filters={"contract": "month_to_month"})
+
+        assert len(calls) == 2
 
 
 # --------------------------------------------------------------- shap_tool
