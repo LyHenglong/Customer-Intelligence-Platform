@@ -590,24 +590,30 @@ class RevenueAtRiskResponse(BaseModel):
 
 @app.get("/overview/revenue-at-risk-by-segment", response_model=RevenueAtRiskResponse)
 def overview_revenue_at_risk_by_segment(
-    threshold: Optional[float] = None, max_rows: int = 100, segment_column: str = "contract",
+    threshold: Optional[float] = None, segment_column: str = "contract",
 ):
+    """Monthly revenue at risk, broken down by segment, over the ENTIRE
+    at-risk population - so these buckets sum to /overview/stats's
+    revenue_at_risk headline rather than to some capped subset of it.
+
+    No max_rows here on purpose, unlike /at-risk: the segment columns ride
+    along on the cached scored frame (see dashboard_queries
+    .score_all_customers), so this is an in-process groupby over columns
+    already in memory - no per-row Postgres fetch, and nothing that grows
+    with the number of rows displayed."""
     if _state["churn"] is None:
         raise HTTPException(status_code=503, detail="Churn model not loaded")
     if segment_column not in ("contract", "tenure_bucket", "education", "marital_status", "payment_method", "gender"):
         raise HTTPException(status_code=422, detail=f"unexpected segment_column {segment_column!r}")
 
     effective_threshold = threshold if threshold is not None else _state["churn"].get("threshold", 0.5)
-    max_rows = max(1, min(max_rows, _AT_RISK_MAX_ROWS))
 
     scored = _get_scored_customers()
-    at_risk = scored[scored["churn_probability"] >= effective_threshold].nlargest(max_rows, "churn_probability")
+    at_risk = scored[scored["churn_probability"] >= effective_threshold]
     if at_risk.empty:
         return RevenueAtRiskResponse(segment_column=segment_column, buckets=[])
 
-    full_rows = dashboard_queries.load_customers_by_id(tuple(at_risk["customer_id"]))
-    merged = full_rows.merge(at_risk[["customer_id", "monthlycharges"]], on="customer_id", suffixes=("", "_scored"))
-    grouped = merged.groupby(segment_column)["monthlycharges"].sum()
+    grouped = at_risk.groupby(segment_column, observed=True)["monthlycharges"].sum()
 
     return RevenueAtRiskResponse(
         segment_column=segment_column,

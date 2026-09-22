@@ -59,9 +59,9 @@ export function getSegmentRates(column: string) {
   return apiFetch<SegmentRatesResponse>(`/overview/segment-rates${qs({ column })}`);
 }
 
-export function getRevenueAtRiskBySegment(threshold?: number, max_rows?: number, segment_column?: string) {
+export function getRevenueAtRiskBySegment(threshold?: number, segment_column?: string) {
   return apiFetch<RevenueAtRiskResponse>(
-    `/overview/revenue-at-risk-by-segment${qs({ threshold, max_rows, segment_column })}`,
+    `/overview/revenue-at-risk-by-segment${qs({ threshold, segment_column })}`,
   );
 }
 
