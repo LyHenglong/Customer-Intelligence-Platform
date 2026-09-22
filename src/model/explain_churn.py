@@ -1,12 +1,12 @@
 """
 Shared per-customer SHAP explanation logic.
 
-Extracted out of src/dashboard/app.py (which originally computed this
-inline) so both the dashboard's At-Risk Customers view and the FastAPI
-/explain-churn/{customer_id} endpoint produce identical SHAP output from
-identical code, rather than maintaining two implementations that could
-silently drift apart - the exact kind of duplication this project has
-avoided everywhere else (recommend_for_profile, stream_query, etc.).
+Shared by the FastAPI /explain-churn/{customer_id} endpoint and the
+/at-risk endpoint's per-row SHAP output, so both produce identical
+explanations from identical code rather than maintaining two
+implementations that could silently drift apart - the exact kind of
+duplication this project has avoided everywhere else
+(recommend_for_profile, stream_query, etc.).
 
 Callers must pass the *raw* (uncalibrated) pipeline - artifact["base_pipeline"]
 if present, else artifact["pipeline"] for pre-calibration artifacts - never
@@ -23,11 +23,9 @@ import shap
 from src.model.train_churn import ALL_FEATURES as CHURN_FEATURES
 from src.model.train_churn import CATEGORICAL_FEATURES as CHURN_CATEGORICAL
 
-# Keyed by id(pipeline), mirroring the dashboard's @st.cache_resource but
-# usable outside a Streamlit runtime (the API needs this too). Safe because
-# a pipeline object is only ever loaded once per process via
-# @st.cache_resource / load_latest_artifact, so id() is stable for the
-# process's lifetime.
+# Keyed by id(pipeline). Safe because a pipeline object is only ever
+# loaded once per process (src/model/api.py's load_models(), run once at
+# startup), so id() is stable for the process's lifetime.
 _explainer_cache: dict[int, "shap.TreeExplainer"] = {}
 
 
@@ -53,8 +51,8 @@ def compute_shap_details(pipeline, customers_df: pd.DataFrame, top_k: int = 5) -
     """Returns, per row of customers_df, the top_k |SHAP value| features as
     structured dicts: {"feature": str, "shap_value": float, "direction": str}.
 
-    Structured rather than pre-formatted text (contrast with the
-    dashboard's older `format_risk_factors_text` output) because the LLM
+    Structured rather than pre-formatted text (contrast with this
+    module's own `format_risk_factors_text` output) because the LLM
     explanation agent needs the real numbers as grounding input in its
     prompt, not a display string built for a table cell.
     """
@@ -88,7 +86,8 @@ def compute_shap_details(pipeline, customers_df: pd.DataFrame, top_k: int = 5) -
 
 
 def format_risk_factors_text(shap_details: list[dict]) -> str:
-    """The dashboard's original compact display format: '▲ feature · ▼ feature'."""
+    """Compact display format: '▲ feature · ▼ feature'. Also the LLM
+    explanation agent's fallback text when the Groq call is unavailable."""
     parts = []
     for d in shap_details:
         sign = "▲" if d["shap_value"] > 0 else "▼"

@@ -19,10 +19,6 @@
 	reverse_proxy api:8000
 }
 
-{$DASHBOARD_DOMAIN} {
-	reverse_proxy dashboard:8501
-}
-
 {$FRONTEND_DOMAIN} {
 	reverse_proxy frontend:3000
 }

@@ -1,11 +1,10 @@
 """Shared, cached loader for the current churn/recommender joblib artifacts.
 
-Mirrors src/model/api.py's load_models() and src/dashboard/app.py's
-load_latest_artifact() - a third process (this AI tool layer) needs the
-same artifacts, so this factors the pattern into one place rather than a
-third copy. Resolution itself (MLflow "champion" alias, falling back to
-glob-latest-by-timestamp) lives in src/model/registry.py, shared by all
-three call sites.
+Mirrors src/model/api.py's load_models() - a second process (this AI tool
+layer) needs the same artifacts, so this factors the pattern into one
+place rather than a second copy. Resolution itself (MLflow "champion"
+alias, falling back to glob-latest-by-timestamp) lives in
+src/model/registry.py, shared by both call sites.
 """
 
 from __future__ import annotations

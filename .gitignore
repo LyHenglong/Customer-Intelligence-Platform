@@ -55,6 +55,3 @@ Thumbs.db
 # Postgres data volume mount (if bind-mounted locally)
 docker/pgdata/
 neon_migration.sql
-
-# Streamlit Community Cloud secrets - never commit real credentials
-.streamlit/secrets.toml

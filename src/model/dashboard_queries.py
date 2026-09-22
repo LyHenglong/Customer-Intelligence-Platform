@@ -1,15 +1,11 @@
-"""Shared warehouse/filesystem read functions for anything that displays
-churn analytics - both src/dashboard/app.py (Streamlit) and the new
-dashboard-facing endpoints in src/model/api.py. Moved here verbatim from
-src/dashboard/app.py (same SQL, same behavior) so both frontends always
-show identical numbers from one code path, instead of Streamlit and the
-API independently reimplementing the same queries and silently drifting
-apart over time.
-
-None of these functions import Streamlit - app.py wraps them in its own
-@st.cache_data decorators at the call site; api.py's callers use their
-own caching where it's needed (see api.py's _get_scored_customers for
-score_all_customers specifically, since that one is expensive).
+"""Shared warehouse/filesystem read functions for the churn-analytics
+dashboard-facing endpoints in src/model/api.py. Originally extracted out
+of the (now-retired) Streamlit dashboard so both frontends showed
+identical numbers from one code path rather than reimplementing the same
+queries independently; kept as its own module since api.py's callers
+apply their own caching where it's needed (see api.py's
+_get_scored_customers for score_all_customers specifically, since that
+one is expensive).
 """
 
 from __future__ import annotations

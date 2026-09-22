@@ -99,9 +99,8 @@ _state: dict = {"churn": None, "churn_version": None, "recommender": None, "reco
 # on every call - too expensive to run on every request). Hand-rolled
 # in-process TTL cache, not Redis/a materialized view: matches this
 # project's consistent "avoid unnecessary infrastructure" choices
-# elsewhere (e.g. pgvector instead of a second DB), and 600s staleness is
-# already the accepted tolerance (same TTL src/dashboard/app.py's own
-# @st.cache_data(ttl=600) uses for the identical computation).
+# elsewhere (e.g. pgvector instead of a second DB). 600s staleness is the
+# accepted tolerance for this computation.
 #
 # The lock spans the recompute itself, not just the check-and-return: a
 # check-then-release-then-recompute pattern would let two concurrent
@@ -126,11 +125,10 @@ _scored_lock = threading.Lock()
 _SCORED_CACHE_TTL_SECONDS = 600
 
 # /at-risk's SHAP + recommendation loop is real per-request CPU work,
-# independent of the (cached) population-scoring pass above. Streamlit
-# bounded this implicitly via one interactive user dragging a 10-500
-# slider; an unauthenticated public REST endpoint has no such bound and
-# could be hit with max_rows=1000000 repeatedly. Server-side clamp, same
-# ceiling as the dashboard's own slider max.
+# independent of the (cached) population-scoring pass above. An
+# unauthenticated public REST endpoint has no natural bound on max_rows
+# and could be hit with max_rows=1000000 repeatedly, so this is a
+# server-side clamp.
 _AT_RISK_MAX_ROWS = 500
 
 
@@ -453,14 +451,13 @@ class OutreachDraftResponse(BaseModel):
 
 @app.post("/outreach-draft/{customer_id}", response_model=OutreachDraftResponse)
 def outreach_draft(customer_id: str):
-    """AI Agent Layer: mirrors src/dashboard/app.py's At-Risk Customers
-    "Generate AI explanations & outreach drafts" flow exactly - same
-    explanation (via _get_explanation, shared with /explain-churn) plus a
-    drafted retention message for the recommender's top suggestion, same
-    Postgres-cached-LLM-then-fallback pattern as everywhere else in this
-    API. Soft-fails to recommended_service/draft: null (200, not 404/503)
-    when the recommender has nothing to suggest - that's not an error,
-    the customer just already has every service."""
+    """AI Agent Layer: same explanation (via _get_explanation, shared with
+    /explain-churn) plus a drafted retention message for the
+    recommender's top suggestion, same Postgres-cached-LLM-then-fallback
+    pattern as everywhere else in this API. Soft-fails to
+    recommended_service/draft: null (200, not 404/503) when the
+    recommender has nothing to suggest - that's not an error, the
+    customer just already has every service."""
     if _state["churn"] is None:
         raise HTTPException(status_code=503, detail="Churn model not loaded")
 
@@ -518,9 +515,8 @@ class OverviewStatsResponse(BaseModel):
 
 @app.get("/overview/stats", response_model=OverviewStatsResponse)
 def overview_stats(threshold: Optional[float] = None):
-    """Headline KPIs - the same numbers src/dashboard/app.py's Overview
-    view computes, sourced from the same dashboard_queries functions so
-    the two frontends can never silently disagree."""
+    """Headline KPIs, sourced from dashboard_queries so this endpoint and
+    any other caller of those functions can never silently disagree."""
     if _state["churn"] is None:
         raise HTTPException(status_code=503, detail="Churn model not loaded")
 
@@ -640,12 +636,11 @@ class AtRiskListResponse(BaseModel):
 
 @app.get("/at-risk", response_model=AtRiskListResponse)
 def at_risk(threshold: Optional[float] = None, max_rows: int = 100, offset: int = 0):
-    """The same list src/dashboard/app.py's At-Risk Customers view shows:
-    top customers by churn probability above threshold, with per-customer
-    SHAP risk factors and a recommended retention action. max_rows is
-    server-clamped (Streamlit's slider made this implicit; an
-    unauthenticated REST endpoint needs it explicit) - the response's own
-    max_rows_used tells the real page size actually returned."""
+    """Top customers by churn probability above threshold, with
+    per-customer SHAP risk factors and a recommended retention action.
+    max_rows is server-clamped (an unauthenticated REST endpoint has no
+    natural bound otherwise) - the response's own max_rows_used tells the
+    real page size actually returned."""
     if _state["churn"] is None:
         raise HTTPException(status_code=503, detail="Churn model not loaded")
 
@@ -685,11 +680,9 @@ def at_risk(threshold: Optional[float] = None, max_rows: int = 100, offset: int 
         recommended_action = None
         if _state["recommender"] is not None:
             try:
-                # Whole row, not a hand-picked column subset - matches
-                # src/dashboard/app.py's own At-Risk view precedent
-                # (recommend_for_profile(rec_artifact, row.to_frame().T,
-                # own, top_n=1)); recommend_for_profile selects the
-                # columns it actually needs internally.
+                # Whole row, not a hand-picked column subset -
+                # recommend_for_profile selects the columns it actually
+                # needs internally.
                 own = [int(full_row[s].iloc[0]) for s in REC_SERVICE_COLUMNS]
                 recs = recommend_for_profile(_state["recommender"], full_row, own, top_n=1)
                 if recs:
@@ -777,11 +770,9 @@ def model_history():
 
 @app.get("/pipeline-status")
 def pipeline_status():
-    """Ingestion, drift, and retrain-summary status - the same data
-    src/dashboard/app.py's Pipeline Status view shows, sourced from the
-    same dashboard_queries functions plus src.agents.cache's already-
-    existing get_latest_retrain_summary (never called from this API
-    before, but generic and unchanged)."""
+    """Ingestion, drift, and retrain-summary status, sourced from
+    dashboard_queries plus src.agents.cache's already-existing
+    get_latest_retrain_summary."""
     ingestion_log = dashboard_queries.load_ingestion_log()
     drift_df = dashboard_queries.load_latest_drift()
     metadata_history = dashboard_queries.load_all_churn_metadata()

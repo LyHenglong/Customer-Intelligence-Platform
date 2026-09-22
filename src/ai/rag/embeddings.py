@@ -7,10 +7,9 @@ heavy, so it must never happen more than once per process and must never
 happen at import time (every test and every module that imports this one
 must not be forced to load a ~90MB model just to be imported).
 
-Kept out of requirements-streamlit-cloud.txt on purpose: the dashboard
-never needs to embed a live query at request time, since the RAG-backed
-AI assistant endpoint lives in the API service, not the Streamlit
-process (see docker-compose.yml's "serving" profile).
+Kept out of docker/requirements-airflow.txt on purpose: only the API
+service ever embeds a live query at request time (see docker-compose.yml's
+"serving" profile).
 """
 
 from __future__ import annotations

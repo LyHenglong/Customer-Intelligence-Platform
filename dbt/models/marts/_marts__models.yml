@@ -6,7 +6,7 @@ models:
       One row per customer: demographics, account/contract info, service
       subscriptions, usage/engagement signals, value segmentation, and the
       churn label. The single source of truth for ML training and the
-      Streamlit dashboard.
+      serving layer.
     columns:
       - name: customer_id
         description: Primary key.

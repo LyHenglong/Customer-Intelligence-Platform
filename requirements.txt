@@ -33,9 +33,6 @@ fastapi==0.115.5
 uvicorn[standard]==0.32.1
 pydantic==2.10.2
 
-# Dashboard
-streamlit==1.40.1
-plotly==5.24.1
 # shap: per-customer explanations for the At-Risk Customers view (TreeExplainer
 # on the LightGBM churn model), computed only for the bounded, displayed
 # subset - never the full customer_360 table.
@@ -49,12 +46,11 @@ groq==1.7.0
 
 # AI assistant RAG layer (src/ai/rag/). sentence-transformers (local
 # embedding + cross-encoder reranking models, no external API key) is
-# deliberately NOT in requirements-streamlit-cloud.txt or
-# docker/requirements-airflow.txt: it pulls in PyTorch, and only the API
-# service (docker-compose's "serving" profile) embeds a live query at
-# request time - the dashboard never does, and ingestion (a one-off,
-# Docker/local command - python -m src.ai.rag.ingest) isn't part of
-# either trimmed environment's runtime path either.
+# deliberately NOT in docker/requirements-airflow.txt: it pulls in
+# PyTorch, and only the API service (docker-compose's "serving" profile)
+# embeds a live query at request time - ingestion (a one-off, Docker/
+# local command - python -m src.ai.rag.ingest) isn't part of that
+# trimmed environment's runtime path either.
 sentence-transformers==3.3.1
 # BM25 sparse retrieval, fused with vector search in
 # src/ai/rag/hybrid_search.py. Pure Python, no heavy transitive deps -

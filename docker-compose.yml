@@ -84,7 +84,7 @@ services:
       # Windows PostgreSQL service on 5432, which silently intercepts
       # 127.0.0.1:5432 connections meant for this container (dual-stack
       # binding conflict). Internal container-to-container traffic
-      # (Airflow, dashboard) still uses port 5432 on the "postgres" service
+      # (Airflow, api) still uses port 5432 on the "postgres" service
       # name and is unaffected by this remap.
       - "5433:5432"
     volumes:
@@ -133,8 +133,8 @@ services:
     ports:
       # Host port 5001, not 5000: 5000 is commonly taken by other local
       # services (e.g. macOS AirPlay). Internal container-to-container
-      # traffic (airflow, api, dashboard) still uses port 5000 on the
-      # "mlflow" service name.
+      # traffic (airflow, api) still uses port 5000 on the "mlflow"
+      # service name.
       - "5001:5000"
     volumes:
       - ./mlflow_artifacts:/mlflow/artifacts
@@ -266,65 +266,11 @@ services:
     # margin above that observed *settled*, not just peak, usage.
     mem_limit: 3072m
 
-  dashboard:
-    build:
-      context: .
-      dockerfile: docker/Dockerfile.dashboard
-    environment:
-      POSTGRES_HOST: postgres
-      POSTGRES_PORT: "5432"
-      POSTGRES_DB: ${POSTGRES_DB}
-      POSTGRES_USER: ${POSTGRES_USER}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
-      # AI Agent Layer: read by the At-Risk Customers view's explanation
-      # and outreach sections. Optional - see the README's "AI Agent
-      # Layer" section for the fallback behavior when unset.
-      GROQ_API_KEY: ${GROQ_API_KEY:-}
-      # AI Decision Assistant tab (src/ai/graph.py): the dashboard calls
-      # the api service over HTTP rather than importing src.ai directly,
-      # since that needs sentence-transformers/PyTorch - see
-      # call_assistant_api()'s docstring in src/dashboard/app.py. Unset
-      # (empty) on Streamlit Cloud, where there is no api service.
-      AI_API_URL: http://api:8000
-      # `streamlit run <script>` only adds the script's own directory to
-      # sys.path, not the working directory - unlike a plain `python -c`
-      # shell, which is why this didn't surface under `docker exec`
-      # testing. `from src.model.train_churn import ...` needs /app on
-      # the path explicitly.
-      PYTHONPATH: /app
-      # Model registry (src/model/registry.py) - best-effort, same
-      # fallback-to-glob-latest behavior as everywhere else this is set.
-      MLFLOW_TRACKING_URI: http://mlflow:5000
-    volumes:
-      - ./models_store:/app/models_store
-    ports:
-      - "8501:8501"
-    depends_on:
-      - postgres
-      - api
-      - mlflow
-    profiles: ["serving"]
-    # Scoring 1,000,000 customers needs real headroom even after the
-    # streaming redesign (see score_all_customers). On this 3.8GB Docker VM
-    # that means not running orchestration and serving flat out at the same
-    # time - stop airflow-* while using the dashboard, or vice versa.
-    # 400m (later 768m) was OOM-killed (exit 137) under a real browser
-    # session - Streamlit's full session/WebSocket state plus rendering 3
-    # plotly charts uses meaningfully more memory than a headless one-shot
-    # script run. app.py was also fixed to stop wastefully full-copying the
-    # 300K+ row dataframe and to stop pulling the unused signup_date column;
-    # this limit is a safety margin on top of those fixes, not a
-    # replacement for them - the host itself is memory-constrained (see
-    # README's RAM rationale), so it isn't raised further than this.
-    mem_limit: 2048m
-
   frontend:
-    # The Next.js frontend (frontend/) - the primary production UI going
-    # forward, talking to the api service's dashboard-facing REST
-    # endpoints instead of Postgres/the filesystem directly (see
-    # src/model/dashboard_queries.py + api.py's new endpoints). The
-    # Streamlit dashboard above stays as-is, unaffected - additive, not a
-    # replacement.
+    # The Next.js frontend (frontend/) - the platform's UI, talking to the
+    # api service's dashboard-facing REST endpoints instead of
+    # Postgres/the filesystem directly (see src/model/dashboard_queries.py
+    # + api.py's endpoints). Streamlit was retired in favor of this.
     build:
       context: .
       dockerfile: docker/Dockerfile.frontend
@@ -354,7 +300,6 @@ services:
     image: caddy:2-alpine
     environment:
       API_DOMAIN: ${API_DOMAIN:-}
-      DASHBOARD_DOMAIN: ${DASHBOARD_DOMAIN:-}
       FRONTEND_DOMAIN: ${FRONTEND_DOMAIN:-}
     ports:
       - "80:80"
@@ -365,7 +310,6 @@ services:
       - caddy_config:/config
     depends_on:
       - api
-      - dashboard
       - frontend
     profiles: ["production"]
     mem_limit: 128m
