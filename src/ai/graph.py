@@ -68,6 +68,7 @@ _SQL_GENERATION_SYSTEM_PROMPT = """You translate a business question into a sing
 
 Allowed tables and columns (use only these):
 - marts.customer_360(customer_id, contract, tenure, tenure_bucket, monthlycharges, totalcharges, customer_satisfaction, num_complaints, num_service_calls, late_payments, total_active_services, churn, gender, education, marital_status, payment_method)
+  - churn is an INTEGER column (0 or 1), not boolean - write `churn = 1`, never `churn = true`.
 - public.feature_drift(reference_batch, current_batch, feature, feature_type, psi, severity, computed_at)
 - public.ingestion_log(batch_file, rows_loaded, loaded_at, status)
 - public.retrain_summaries(churn_model_version, previous_version, summary_text, created_at)
@@ -78,7 +79,7 @@ Rules:
 - Include a LIMIT clause (100 or fewer) unless the query is a small aggregate.
 - Reference only the tables/columns listed above."""
 
-_GENERATION_SYSTEM_PROMPT = """You are a business intelligence assistant for a telecom customer analytics platform. Answer the user's question using ONLY the evidence listed below - never invent a number, customer fact, or claim that isn't present in it. If the evidence only partially answers the question, say what it does and does not cover. Keep the answer to 3-6 sentences, written for a business audience (no mention of "SHAP", "evidence objects", or other implementation details)."""
+_GENERATION_SYSTEM_PROMPT = """You are a business intelligence assistant for a telecom customer analytics platform. Answer the user's question using ONLY the evidence listed below - never invent a number, customer fact, or claim that isn't present in it. Reproduce every number exactly as it appears in the evidence - do not round it, abbreviate it (e.g. "396K" for 395809), or convert its units (e.g. do not turn a decimal fraction like 0.0992 into a percentage like "9.9%"); an automated check rejects the whole answer if a number doesn't match the evidence's exact text. If the evidence only partially answers the question, say what it does and does not cover. Keep the answer to 3-6 sentences, written for a business audience (no mention of "SHAP", "evidence objects", or other implementation details)."""
 
 
 def _strip_sql_fences(text: str) -> str:
