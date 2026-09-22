@@ -1,12 +1,8 @@
 """
 Tests for src/model/dashboard_queries.py - the warehouse/filesystem read
-functions shared by src/dashboard/app.py (Streamlit) and the new
-dashboard-facing FastAPI endpoints. These functions were moved here
-verbatim from src/dashboard/app.py; these tests pin the same contract
-tests/test_dashboard.py already covers indirectly by importing
-column_importances from the app module (still works - app.py re-exports
-it), plus direct coverage for the ones that weren't independently tested
-before this extraction.
+functions behind the dashboard-facing FastAPI endpoints (originally
+extracted out of the now-retired Streamlit dashboard, which shared this
+same code).
 
 Deliberately built on a fake Postgres connection/cursor, like the rest of
 this suite (see tests/test_ai_tools.py) - no live database.

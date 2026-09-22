@@ -18,35 +18,19 @@ Every number below is measured and reproducible, with the full derivation linked
 | **Drift monitoring** | PSI-based, verified to fire on injected shifts (18 tests) *and* in a live triggered DAG run — correctly found no drift across 12 real batch comparisons ([Drift monitoring](#drift-monitoring)) |
 | **Scale & rigor** | 1,000,000 rows end to end, 63/63 tests green in CI, full Airflow DAG runs verified against a live webserver (not `airflow tasks test` shortcuts) ([Verified state](#verified-state)) |
 
-## The dashboard
+## The frontend
 
-The platform's user-facing surface is an executive retention dashboard, served by Streamlit and scoring all 1,000,000 customers live against the latest model artifact. Every figure below is real output from a running instance, not a mockup.
+The platform's user-facing surface is a Next.js app (`frontend/`) that scores all 1,000,000 customers live against the latest model artifact via the FastAPI serving layer's dashboard-facing REST endpoints (`/overview/*`, `/at-risk`, `/customers`, `/pipeline-status`, `/model-history`) rather than reading Postgres directly:
 
-![Retention Command Center - executive overview](docs/images/dashboard-overview.png)
+- **Overview** — headline KPIs (churn rate, at-risk count/revenue, model AUC) plus top feature importances.
+- **At-Risk Customers** — a ranked action list where each row carries a *per-customer* SHAP explanation (▲ = pushes risk up) and a concrete next-best-offer from the recommender, with an opt-in AI Agent Layer section for plain-English risk explanations and drafted retention messages (see [AI Agent Layer](#ai-agent-layer)).
+- **Customers** — a searchable customer list and per-customer detail page, a capability the platform's original Streamlit dashboard never had.
+- **Segments** — churn rate broken out across demographic/account segments.
+- **Model Performance** — the model as it actually is: AUC, recall/precision at the chosen threshold, and top feature importances.
+- **Pipeline Status** — the orchestration layer exposed to the same audience: batches ingested, batches remaining until the next conditional retrain, model versions trained to date, and an AI-generated plain-English summary of the most recent real retrain.
+- **AI Assistant** — a chat interface over the RAG-backed AI Decision Assistant (see [AI Agent Layer](#ai-agent-layer)).
 
-Headline KPIs sit above a view selector; the banner under the title keeps the synthetic-data caveat visible on every screen rather than burying it in documentation.
-
-![At-risk customers with per-customer SHAP explanations](docs/images/dashboard-at-risk-customers.png)
-
-The **At-Risk Customers** view is the operational one: a ranked action list where each row carries a *per-customer* SHAP explanation (▲ = pushes risk up) and a concrete next-best-offer from the recommender — not a single global feature-importance chart applied to everyone.
-
-![Model performance, including the metrics that aren't flattering](docs/images/dashboard-model-performance.png)
-
-**Model Performance** reports the model as it actually is: AUC 0.669, recall 0.60 at the chosen threshold, and precision 0.16. The low precision is a deliberate consequence of the threshold rationale shown on the same screen — see [Limitations](#limitations) and `notebooks/threshold_and_business_value.ipynb` for why a low-precision, high-recall operating point is the correct choice for this retention problem. Since [probability calibration](#probability-calibration) was added, this screen's threshold (0.105) is a real probability, not an arbitrary score — a big change from the 0.5-adjacent numbers a first pass at this model produced.
-
-![Churn rate across demographic segments](docs/images/dashboard-segments.png)
-
-The **Segments** view doubles as a visual confirmation of a negative result: churn rate is essentially flat across education, marital status, and gender. That matches the formal chi-square testing in `notebooks/eda_and_statistical_analysis.ipynb`, where none of the demographic variables reached practical significance.
-
-![Batch ingestion and retraining status](docs/images/dashboard-pipeline-status.png)
-
-**Pipeline Status** exposes the orchestration layer to the same audience: batches ingested (13/13), batches remaining until the next conditional retrain, the number of model versions trained to date, and an AI-generated plain-English summary of the most recent real retrain, written by the DAG's `summarize_retrain` task (see [AI Agent Layer](#ai-agent-layer)):
-
-![AI-generated plain-English retrain summary](docs/images/dashboard-retrain-summary.png)
-
-The At-Risk Customers view also carries an opt-in AI Agent Layer section: per-customer plain-English risk explanations and drafted retention messages, generated on request (capped to the top 15 by risk, cached per customer per model version) rather than automatically for every row:
-
-![AI-generated churn explanations and drafted outreach messages](docs/images/dashboard-ai-agent-layer.png)
+The platform originally shipped this surface as a Streamlit dashboard; it was retired in favor of this Next.js app (see git history for the Streamlit-era screenshots and verification narrative this README used to include).
 
 ## Motivation
 
@@ -102,13 +86,13 @@ Kaggle CSV (1,000,000 rows, synthetic)
 customer_360 (one row per customer: demographics, account, services,
               usage, value segmentation, churn label)
         │
-        ├──────────────────────────────┬──────────────────────────────┐
-        ▼                              ▼                              ▼
-  train_churn.py                train_recommender.py           Streamlit dashboard
-  (LightGBM,                    (k-NN over profile                (reads customer_360
-   class_weight=balanced)        vectors, content-based)            directly, scores it
-        │                              │                             live with the latest
-        ▼                              ▼                             model artifacts)
+        ├──────────────────────────────┐
+        ▼                              ▼
+  train_churn.py                train_recommender.py
+  (LightGBM,                    (k-NN over profile
+   class_weight=balanced)        vectors, content-based)
+        │                              │
+        ▼                              ▼
   models_store/                 models_store/
   churn_model_<ts>.joblib       recommender_<ts>.joblib
         │                              │
@@ -116,16 +100,21 @@ customer_360 (one row per customer: demographics, account, services,
                         ▼
               FastAPI (src/model/api.py)
    POST /predict-churn  POST /recommend  GET /explain-churn/{id}
-     (loads latest artifact of each at startup,
-      no live DB dependency at request time,
-      except /explain-churn and /recommend's fallback path)
+   GET /overview/*  GET /at-risk  GET /customers  GET /pipeline-status
+     (loads latest artifact of each at startup, no live DB dependency
+      at request time for predictions; dashboard-facing endpoints read
+      customer_360 directly via src/model/dashboard_queries.py)
                         │
-                        ▼
-         AI Agent Layer (src/agents/) — presentation only
-   explanation_agent / outreach_agent / retrain_summary_agent
-    narrate SHAP values, recommendations, and retrain metrics
-    in plain English via Groq — never change a prediction or
-     a recommendation, and degrade to raw data on any failure
+                        ├──────────────────────────────┐
+                        ▼                              ▼
+         AI Agent Layer (src/agents/) — presentation    Next.js frontend (frontend/)
+              only, explanation_agent /                  the platform's UI - Overview,
+          outreach_agent / retrain_summary_agent          At-Risk Customers, Customers,
+           narrate SHAP values, recommendations,           Segments, Model Performance,
+          and retrain metrics in plain English via          Pipeline Status, AI Assistant
+         Groq - never change a prediction or a
+          recommendation, degrade to raw data on
+                     any failure
 ```
 
 ## Repository Structure
@@ -143,21 +132,19 @@ customer_360 (one row per customer: demographics, account, services,
 │   │   ├── train_churn.py         # trains, calibrates, and evaluates the churn classifier, saves versioned artifact
 │   │   ├── train_recommender.py   # trains the content-based recommender, saves versioned artifact
 │   │   ├── evaluate_recommender.py # leave-one-out offline evaluation vs. popularity/random baselines
-│   │   ├── explain_churn.py       # shared per-customer SHAP logic (dashboard + /explain-churn both call this)
+│   │   ├── explain_churn.py       # shared per-customer SHAP logic (used by both /explain-churn and /at-risk)
 │   │   ├── threshold_analysis.py  # expected-value threshold selection (cost/benefit model)
-│   │   ├── dashboard_queries.py   # warehouse/filesystem reads shared by app.py and api.py's dashboard endpoints
+│   │   ├── dashboard_queries.py   # warehouse/filesystem reads behind api.py's dashboard-facing endpoints
 │   │   └── api.py                 # FastAPI app: predictions, dashboard-facing REST endpoints, AI assistant
 │   ├── monitoring/
 │   │   └── drift.py               # PSI drift detection between batches (see Drift monitoring)
-│   ├── agents/                    # AI Agent Layer - presentation only, see AI Agent Layer
-│   │   ├── groq_client.py         # shared Groq wrapper: retry/backoff, model tiers, token logging
-│   │   ├── explanation_agent.py   # SHAP values -> plain-English churn explanation
-│   │   ├── outreach_agent.py      # explanation + recommendation -> drafted retention message
-│   │   ├── retrain_summary_agent.py # old vs. new metrics + drift -> plain-English retrain summary
-│   │   └── cache.py               # Postgres-backed cache, keyed by customer + agent + model version
-│   └── dashboard/
-│       └── app.py                 # Streamlit dashboard, reads customer_360 directly
-├── frontend/                       # Next.js frontend - primary production UI, talks to api.py's REST endpoints
+│   └── agents/                    # AI Agent Layer - presentation only, see AI Agent Layer
+│       ├── groq_client.py         # shared Groq wrapper: retry/backoff, model tiers, token logging
+│       ├── explanation_agent.py   # SHAP values -> plain-English churn explanation
+│       ├── outreach_agent.py      # explanation + recommendation -> drafted retention message
+│       ├── retrain_summary_agent.py # old vs. new metrics + drift -> plain-English retrain summary
+│       └── cache.py               # Postgres-backed cache, keyed by customer + agent + model version
+├── frontend/                       # Next.js frontend - the platform's UI, talks to api.py's REST endpoints
 │   ├── app/                        # App Router pages: overview, at-risk, customers, segments, model-performance, pipeline-status, assistant
 │   ├── components/                 # KpiCard, ChurnBarChart, ShapFactorList, etc.
 │   └── lib/                        # api-client.ts (typed fetch per endpoint), types.ts
@@ -183,32 +170,27 @@ customer_360 (one row per customer: demographics, account, services,
 │   ├── test_model.py               # 13 tests: expected-value math, threshold selection, recommender invariants
 │   ├── test_drift.py               # 18 tests: PSI correctness, incl. shifts the detector must catch
 │   ├── test_evaluate_recommender.py # 20 tests: ranking metrics, leave-one-out splitting, significance tests
-│   ├── test_dashboard.py           # 5 tests: pins the CalibratedClassifierCV/.named_steps regression (see Deviations)
+│   ├── test_dashboard_queries.py   # pins the CalibratedClassifierCV/.named_steps regression (see Deviations)
 │   └── test_agents.py              # 28 tests: AI Agent Layer - prompt grounding, retry/backoff, fallback (Groq mocked)
 ├── docs/
-│   └── images/                     # dashboard screenshots used in this README
+│   └── images/                     # historical screenshots from the retired Streamlit dashboard
 ├── report/
 │   ├── findings.md                 # business-facing write-up (synthetic-data caveat up front)
 │   └── retrain_summaries/          # AI-generated, one .md per real retrain (written by summarize_retrain)
 ├── docker/
 │   ├── Dockerfile.airflow
 │   ├── Dockerfile.api
-│   ├── Dockerfile.dashboard
 │   ├── Dockerfile.frontend
 │   ├── Dockerfile.mlflow
 │   ├── Caddyfile                   # self-hosted TLS (see Production hardening)
 │   ├── requirements-airflow.txt
 │   └── init-multi-db.sh
 ├── scripts/
-│   ├── capture_screenshots.py      # regenerates the dashboard screenshots used in this README
 │   └── migrate_to_neon.sh          # one-time: copies customer_360 + operational tables to a hosted Postgres
-├── .streamlit/
-│   └── secrets.toml.example        # template for Streamlit Community Cloud's Secrets UI (see deploy step 5)
 ├── docker-compose.yml
 ├── .github/workflows/ci.yml
 ├── requirements.txt                # pipeline + serving + CI
 ├── requirements-notebooks.txt      # analysis-only extras (see Statistical & analytical depth)
-├── requirements-streamlit-cloud.txt # trimmed dashboard-only deps for the public demo (see How to run, step 6)
 ├── pytest.ini
 ├── .env.example
 ├── .gitignore
@@ -219,7 +201,7 @@ customer_360 (one row per customer: demographics, account, services,
 
 **Customer 360** is a standard enterprise data pattern: a single, unified table consolidating everything known about a customer — demographics, account details, service subscriptions, usage, and churn risk — instead of that information being scattered across tables that must be joined every time it's needed.
 
-`marts.customer_360` is dbt's final mart model: one row per customer, built by joining 5 staging models and 3 intermediate models. It is the **only** table the churn model, the recommender, and the Streamlit dashboard read from.
+`marts.customer_360` is dbt's final mart model: one row per customer, built by joining 5 staging models and 3 intermediate models. It is the **only** table the churn model, the recommender, and the serving layer read from.
 
 ### dbt lineage
 
@@ -250,11 +232,11 @@ Beyond the production pipeline, `notebooks/eda_and_statistical_analysis.ipynb` i
 - **Correlation & multicollinearity**: a correlation heatmap plus Variance Inflation Factors across key numeric features.
 - **Survival analysis**: Kaplan-Meier curves (overall and by contract type) and a Cox Proportional Hazards model — modeling *time to churn* directly, which the binary classifier discards. `is_month_to_month` carries a hazard ratio of ~2.77 (holding other factors constant); concordance index 0.617. Kaplan-Meier: 94.7% of customers still active at 12 months tenure, 90.2% at 24, 82.1% at 48.
 - **Unsupervised customer segmentation**: K-means clustering on profile features (age, income, tenure, charges, satisfaction, usage, service count), with an elbow/silhouette analysis to choose k and a PCA projection to visualize it. Reported honestly: silhouette scores are modest (~0.14–0.16), meaning the natural cluster structure is soft, not sharply separated — stated plainly rather than overclaimed.
-- **SHAP explainability**: TreeExplainer on the production LightGBM model, both as a global summary plot and individual waterfall plots for specific high-risk and low-risk customers. This same SHAP logic is also used live in the **dashboard's At-Risk Customers view** (`compute_shap_risk_factors` in `src/dashboard/app.py`) — replacing an earlier global-feature-importance heuristic with real per-customer explanations (bounded to the displayed rows, not the full 1M-row table, for memory reasons).
+- **SHAP explainability**: TreeExplainer on the production LightGBM model, both as a global summary plot and individual waterfall plots for specific high-risk and low-risk customers. This same SHAP logic is also used live in the **frontend's At-Risk Customers view** (`compute_shap_details` in `src/model/explain_churn.py`) — replacing an earlier global-feature-importance heuristic with real per-customer explanations (bounded to the displayed rows, not the full 1M-row table, for memory reasons).
 
 ### Re-running the analysis
 
-The notebooks need libraries the pipeline itself doesn't (statsmodels, lifelines, xgboost, imbalanced-learn, matplotlib, seaborn). Those live in a **separate** requirements file, deliberately: `requirements.txt` is installed into the API image, the dashboard image, and every CI run, none of which import any of them.
+The notebooks need libraries the pipeline itself doesn't (statsmodels, lifelines, xgboost, imbalanced-learn, matplotlib, seaborn). Those live in a **separate** requirements file, deliberately: `requirements.txt` is installed into the API image and every CI run, neither of which import any of them.
 
 ```bash
 pip install -r requirements.txt -r requirements-notebooks.txt
@@ -277,9 +259,7 @@ PSI < 0.10          stable        - no action
 PSI >= 0.25         significant   - retrain
 ```
 
-19 features are monitored (14 numeric, 5 categorical). Results are written to `public.feature_drift` by the DAG's `detect_feature_drift` task and surfaced on the dashboard's Pipeline Status view.
-
-![Feature drift monitoring](docs/images/dashboard-drift.png)
+19 features are monitored (14 numeric, 5 categorical). Results are written to `public.feature_drift` by the DAG's `detect_feature_drift` task and surfaced on the frontend's Pipeline Status view.
 
 This turns retraining into a two-trigger decision rather than a fixed cadence:
 
@@ -362,11 +342,11 @@ Every example below is real output from this running platform, not illustrative 
 >
 > *"The model estimates a 32.6% chance that the customer will churn, driven primarily by the fact that they are on a contract, have logged multiple complaints, and have made several service calls, all of which raise the risk. Additional contributors are late payments and a younger age, which also increase the likelihood of churn."*
 
-One real limitation worth stating plainly: "on a contract" doesn't say *which* contract type. The SHAP feature-name mapping (pre-existing, used identically by the dashboard's SHAP column) collapses a one-hot-encoded categorical back to its base column name (`cat__contract_two_year` → `contract`), which loses the specific value. The agent is faithfully narrating what it was given - the imprecision is upstream of it, not invented by it.
+One real limitation worth stating plainly: "on a contract" doesn't say *which* contract type. The SHAP feature-name mapping (pre-existing, used identically by the frontend's SHAP column) collapses a one-hot-encoded categorical back to its base column name (`cat__contract_two_year` → `contract`), which loses the specific value. The agent is faithfully narrating what it was given - the imprecision is upstream of it, not invented by it.
 
 ### Retention outreach
 
-The dashboard's At-Risk Customers view feeds the explanation above, plus the recommender's real top-1 suggestion for the same customer, into `draft_outreach()`.
+The frontend's At-Risk Customers view feeds the explanation above, plus the recommender's real top-1 suggestion for the same customer, into `draft_outreach()` (via `POST /outreach-draft/{customer_id}`).
 
 > **Recommended service (from `recommend_for_profile`, unchanged): Internet Service, score 0.948.**
 >
@@ -384,14 +364,14 @@ The DAG's `summarize_retrain` task runs after `retrain_churn_model`, comparing t
 >
 > *"The new model shows a regression compared to the previous version: the f1 score dropped from 0.2528 to 0.2411 and the ROC‑AUC fell from 0.6693 to 0.6564, both changes exceeding the 0.01 threshold. Precision and recall changed by less than 0.01, so those metrics are essentially unchanged. No significant feature drift was detected in the triggering batch."*
 
-Written to `report/retrain_summaries/retrain_summary_20260910T154013Z.md` and to the `retrain_summaries` Postgres table, and shown on the dashboard's Pipeline Status view. The regression itself is expected noise (see [Verified state](#verified-state) for why: both artifacts trained on the same 150K-row sample with the same random seed, so this reflects sampling variance in the calibration/test split, not a real capability drop) - included here specifically *because* it's the honest case, not the flattering "essentially unchanged" one from an earlier direct test.
+Written to `report/retrain_summaries/retrain_summary_20260910T154013Z.md` and to the `retrain_summaries` Postgres table, and shown on the frontend's Pipeline Status view. The regression itself is expected noise (see [Verified state](#verified-state) for why: both artifacts trained on the same 150K-row sample with the same random seed, so this reflects sampling variance in the calibration/test split, not a real capability drop) - included here specifically *because* it's the honest case, not the flattering "essentially unchanged" one from an earlier direct test.
 
 ### Guardrails
 
-- **Caching**: every explanation/outreach is cached in Postgres, keyed by `(customer_id, agent_type, churn_model_version)` - a retrain invalidates the cache (correctly: the SHAP values it's explaining changed), but a dashboard refresh or re-running the pipeline without a retrain does not. Measured: a cache hit returns in ~0.02s against ~4.5s for a real call.
-- **Retry/backoff on rate limits**: `groq_client.complete()` retries up to 3 times with exponential backoff on `RateLimitError`/timeouts. This is not theoretical - generating AI content for 15 real customers in one dashboard session genuinely hit Groq's free-tier rate limit mid-run (`429 Too Many Requests`, visible in the container logs), and the backoff recovered every one of them without the feature failing.
-- **Graceful fallback everywhere**: every call site (`/explain-churn`, the dashboard's At-Risk Customers and Pipeline Status views, the DAG's `summarize_retrain`) catches `AgentCallFailed` and falls back to the raw underlying data (SHAP text, recommendation, metrics dict) rather than raising a 5xx or crashing a Streamlit script. `GROQ_API_KEY` unset is itself a handled case, not an error - the platform runs completely normally without it, just without the AI prose.
-- **Cost bounded on purpose**: the dashboard generates AI content only on an explicit button click, capped to the top 15 at-risk customers (`AI_AGENT_MAX_CUSTOMERS`) regardless of how many the raw SHAP table shows - a deliberate cap independent of the "max at-risk to display" slider, so an enthusiastic click can't fire an unbounded burst of calls against a free-tier limit.
+- **Caching**: every explanation/outreach is cached in Postgres, keyed by `(customer_id, agent_type, churn_model_version)` - a retrain invalidates the cache (correctly: the SHAP values it's explaining changed), but a page refresh or re-running the pipeline without a retrain does not. Measured: a cache hit returns in ~0.02s against ~4.5s for a real call.
+- **Retry/backoff on rate limits**: `groq_client.complete()` retries up to 3 times with exponential backoff on `RateLimitError`/timeouts. This is not theoretical - generating AI content for 15 real customers in one session genuinely hit Groq's free-tier rate limit mid-run (`429 Too Many Requests`, visible in the container logs), and the backoff recovered every one of them without the feature failing.
+- **Graceful fallback everywhere**: every call site (`/explain-churn`, `/outreach-draft/{customer_id}`, the DAG's `summarize_retrain`) catches `AgentCallFailed` and falls back to the raw underlying data (SHAP text, recommendation, metrics dict) rather than raising a 5xx. `GROQ_API_KEY` unset is itself a handled case, not an error - the platform runs completely normally without it, just without the AI prose.
+- **Cost bounded on purpose**: the frontend generates AI content only on an explicit button click, one customer at a time (`/outreach-draft/{customer_id}` is a per-customer endpoint, not a batch call) - an enthusiastic user clicking through many rows still fires at most one Groq call per click, and the Postgres cache means re-viewing the same customer costs nothing.
 
 ### Enabling it
 
@@ -401,7 +381,7 @@ Optional - everything else in this project works without it. Get a free key at [
 GROQ_API_KEY=gsk_...
 ```
 
-then restart the `api`/`dashboard` containers (or `airflow-scheduler` for retrain summaries) so the env var is picked up. `tests/test_agents.py` needs no key at all - every Groq call is mocked.
+then restart the `api` container (or `airflow-scheduler` for retrain summaries) so the env var is picked up. `tests/test_agents.py` needs no key at all - every Groq call is mocked.
 
 ## How to run
 
@@ -438,14 +418,13 @@ python -m src.model.train_recommender
 ### 5. Serve
 
 ```bash
-docker compose --profile serving up -d api dashboard frontend
+docker compose --profile serving up -d api frontend
 ```
 
 - API docs: http://localhost:8000/docs
-- Dashboard (Streamlit): http://localhost:8501
 - Frontend (Next.js): http://localhost:3000
 
-`api`, `dashboard`, and `frontend` are behind Docker Compose's `serving` profile, so a plain `docker compose up` (warehouse + orchestration only) doesn't also pay for three more containers you may not be actively using — deliberate, given the RAM constraint. The Next.js app under [`frontend/`](frontend/) is the primary production UI going forward — same warehouse, same models, but through `api`'s dashboard-facing REST endpoints (`/overview/*`, `/at-risk`, `/customers`, `/pipeline-status`, `/model-history`) instead of reading Postgres directly. It adds two things the Streamlit dashboard never had: a searchable customer list (`/customers`) and a per-customer detail page (`/customers/[id]`). The Streamlit dashboard stays exactly as it was — additive, not replaced — and remains the app actually deployed to the public demo in step 6 below.
+`api` and `frontend` are behind Docker Compose's `serving` profile, so a plain `docker compose up` (warehouse + orchestration only) doesn't also pay for containers you may not be actively using — deliberate, given the RAM constraint. The Next.js app under [`frontend/`](frontend/) is the platform's UI — talking to `api`'s dashboard-facing REST endpoints (`/overview/*`, `/at-risk`, `/customers`, `/pipeline-status`, `/model-history`) instead of reading Postgres directly.
 
 To run the frontend outside Docker for local development (hot reload):
 
@@ -455,37 +434,22 @@ cd frontend && npm install && cp .env.local.example .env.local && npm run dev
 
 ### 6. Public demo deployment (optional)
 
-The dashboard can run on **Streamlit Community Cloud** (free) against a hosted **Neon** Postgres (free), so it's reachable without cloning the repo or running Docker. Deliberately scoped to just the dashboard — Airflow stays local-only (it's an admin/orchestration tool with a login, not something a portfolio visitor needs to see live), and the warehouse it reads is a **read-mostly copy**, not the live pipeline.
+Both the API and the frontend can run reachable from anywhere — [Neon](https://neon.tech) (free Postgres) plus [Render](https://render.com) (free Docker-based web services) — without cloning the repo or running Docker locally. Deliberately scoped to just these two services — Airflow stays local-only (it's an admin/orchestration tool with a login, not something a portfolio visitor needs to see live), and the warehouse the API reads is a **read-mostly copy**, not the live pipeline.
 
 1. **Create a free [Neon](https://neon.tech) project.** Copy its connection details (host, database, user, password — Neon shows these as one connection string; split it into the pieces below).
-2. **Migrate the data** the dashboard actually reads (`marts.customer_360` plus the small operational tables — deliberately *not* the raw/staging pipeline tables, which the dashboard never queries and would roughly double the transfer):
+2. **Migrate the data** the API actually reads (`marts.customer_360` plus the small operational tables — deliberately *not* the raw/staging pipeline tables, which the serving layer never queries and would roughly double the transfer):
    ```bash
    docker compose up -d postgres   # local warehouse must be running
    ./scripts/migrate_to_neon.sh "postgresql://user:pass@host/dbname?sslmode=require"
    ```
    Run for real against a live Neon database, not just a local stand-in: all 1,000,000 `customer_360` rows, 228 drift rows, 13 ingestion-log rows round-tripped correctly (213MB transferred), re-verified with direct queries against Neon itself afterward.
 3. **Push this repo to GitHub** (already done — [github.com/LyHenglong/Customer-Intelligence-Platform](https://github.com/LyHenglong/Customer-Intelligence-Platform)).
-4. **Create a Streamlit Community Cloud app** at [share.streamlit.io](https://share.streamlit.io) (sign in with GitHub): point it at this repo, branch `main`, main file path `src/dashboard/app.py`, and set the **requirements file** to `requirements-streamlit-cloud.txt` in Advanced settings — a trimmed dependency list (verified by actually installing it into a clean virtualenv and running the app against it) that excludes `dbt-core`/`kaggle`/`fastapi`, none of which the dashboard imports. A root-level `runtime.txt` (`python-3.11`, matching every Docker image in this repo) states the intended Python version explicitly — but Streamlit Cloud has a currently-documented platform bug where this is sometimes ignored (confirmed independently: a real deploy hit Python 3.14 regardless), so **the psycopg2 pin below is the fix this actually depends on, not the Python version request**.
-5. **Add secrets** in the app's Settings → Secrets, using [`.streamlit/secrets.toml.example`](.streamlit/secrets.toml.example) as the template — your real Neon host/user/password, `POSTGRES_SSLMODE = "require"`. Leave `GROQ_API_KEY` out unless you want a public visitor able to trigger real (rate-limited, cost-bearing) calls against your own Groq quota — see the [AI Agent Layer](#ai-agent-layer) guardrails section for what stays intact either way (the app runs completely normally without it, just without the AI prose).
+4. **Create a [Render](https://render.com) account**, then **New → Blueprint**, and point it at this GitHub repo. [`render.yaml`](render.yaml) is a ready-to-use [Render Blueprint](https://render.com/docs/blueprint-spec) that Render reads from the repo root automatically, creating both `telecom-churn-api` and `telecom-churn-frontend` as standalone web services from `docker/Dockerfile.api`/`docker/Dockerfile.frontend`. Render was picked over alternatives (Fly.io, Railway, Vercel for the frontend) mainly to keep one platform for both services, with a free tier that needs no credit card and supports Dockerfile-based web services directly.
+5. **Fill in `telecom-churn-api`'s env vars** Render prompts for (`POSTGRES_HOST/DB/USER/PASSWORD`) with the same Neon project from step 1. `GROQ_API_KEY` is optional — leave it out unless you want a public visitor able to trigger real (rate-limited, cost-bearing) calls against your own Groq quota; see the [AI Agent Layer](#ai-agent-layer) guardrails section for what stays intact either way (the platform runs completely normally without it, just without the AI prose). Leave `CORS_ALLOWED_ORIGINS` and `telecom-churn-frontend`'s `NEXT_PUBLIC_API_URL` on their placeholder for now — neither service's real URL exists yet.
+6. **Copy each deployed service's URL** (Render shows these after the first successful deploy — something like `https://telecom-churn-api.onrender.com` and `https://telecom-churn-frontend.onrender.com`).
+7. **Set `CORS_ALLOWED_ORIGINS`** on `telecom-churn-api` to the frontend's URL, and **`NEXT_PUBLIC_API_URL`** on `telecom-churn-frontend` to the API's URL, then **manually redeploy `telecom-churn-frontend` specifically** — `NEXT_PUBLIC_API_URL` is inlined into the browser bundle at build time (see `docker/Dockerfile.frontend`'s comment), so an env var update alone doesn't take effect until the next build.
 
-`src/warehouse.py` and the dashboard's own `get_pg_conn()` both connect with `sslmode="prefer"` (configurable via `POSTGRES_SSLMODE`), so the identical code reaches both the local Docker Postgres (no SSL) and Neon (SSL required) without an environment-specific branch — see Deviations for the real bugs this deployment path surfaced along the way.
-
-**On first-load speed:** the dashboard was run for real against this live Neon database and rendered all 1,000,000 customers correctly, but took several minutes to do so from this development machine specifically - see [Verified state](#verified-state) for the measured numbers and why Streamlit Cloud's own (US-based) infrastructure is likely to see meaningfully better latency to Neon's US regions than this measurement reflects.
-
-### 7. Deploying the API and the Next.js frontend to Render (optional)
-
-**Not deployed as part of this repo — the steps below are instructions, not a record of something already done.** Two things this unlocks:
-
-- **The Streamlit dashboard's AI Assistant tab.** Streamlit Community Cloud runs only the dashboard process, with no way to also run a second, separate service alongside it — so the deployment in step 6 has no FastAPI service to call, and its AI Assistant tab shows the honest "not available in this lightweight public demo" message (`src/dashboard/app.py`'s `AI_API_URL` check) instead of failing silently.
-- **A public deployment of the Next.js frontend itself** (`frontend/`, step 5) — the primary production UI, which needs both a reachable API and its own hosting.
-
-[`render.yaml`](render.yaml) is a ready-to-use [Render Blueprint](https://render.com/docs/blueprint-spec) that deploys both: `docker/Dockerfile.api` and `docker/Dockerfile.frontend` as two standalone web services. Render was picked over alternatives (Fly.io, Railway, Vercel for the frontend) mainly to keep one platform for both services, with a free tier that needs no credit card and supports Dockerfile-based web services directly — matching this repo's existing Docker-first approach rather than needing a second, non-Docker build path for the frontend.
-
-1. **Create a [Render](https://render.com) account**, then **New → Blueprint**, and point it at this GitHub repo — Render reads `render.yaml` from the repo root automatically and creates both services.
-2. **Fill in `telecom-churn-api`'s env vars** Render prompts for (`POSTGRES_HOST/DB/USER/PASSWORD`) with the **same Neon project** used for the dashboard deploy in step 6, so both surfaces read the same warehouse. `GROQ_API_KEY` is optional, same caveat as step 5 (a public visitor could trigger real calls against your own Groq quota). Leave `CORS_ALLOWED_ORIGINS` and `telecom-churn-frontend`'s `NEXT_PUBLIC_API_URL` on their placeholder for now — neither service's real URL exists yet.
-3. **Copy each deployed service's URL** (Render shows these after the first successful deploy — something like `https://telecom-churn-api.onrender.com` and `https://telecom-churn-frontend.onrender.com`).
-4. **Set `CORS_ALLOWED_ORIGINS`** on `telecom-churn-api` to the frontend's URL, and **`NEXT_PUBLIC_API_URL`** on `telecom-churn-frontend` to the API's URL, then **manually redeploy `telecom-churn-frontend` specifically** — `NEXT_PUBLIC_API_URL` is inlined into the browser bundle at build time (see `docker/Dockerfile.frontend`'s comment), so an env var update alone doesn't take effect until the next build.
-5. **(Optional) Add `AI_API_URL`** to the Streamlit Cloud app's Secrets (step 6.5), set to the API's URL, to also light up the Streamlit dashboard's AI Assistant tab.
+`src/warehouse.py`'s `get_pg_conn()` connects with `sslmode="prefer"` (configurable via `POSTGRES_SSLMODE`), so the identical code reaches both the local Docker Postgres (no SSL) and Neon (SSL required) without an environment-specific branch — see Deviations for the real bugs this deployment path surfaced along the way.
 
 Two things worth knowing before relying on this:
 - **Free-tier cold starts**: Render's free web services spin down after ~15 minutes idle; the first request after that pays a 10-50s cold-start delay to spin back up. Expected behavior on the free plan, not a bug — a visitor's first request after a quiet period will just be slow, not broken.
@@ -506,7 +470,7 @@ dbt test
 pytest tests/ -v
 ```
 
-91 tests, all operating on synthetic in-memory fixtures — no database, no Docker, no trained model artifact, and (for the AI Agent Layer) no real Groq API key required, which is what lets the GitHub Actions workflow run them on a clean checkout.
+95 tests in this table's own subset, all operating on synthetic in-memory fixtures — no database, no Docker, no trained model artifact, and (for the AI Agent Layer) no real Groq API key required, which is what lets the GitHub Actions workflow run them on a clean checkout. The full suite (`pytest tests/`) is larger still - it also covers the AI Agent Layer's RAG/tool-calling internals and the FastAPI dashboard-facing endpoints, not tabulated individually here.
 
 | File | Tests | Covers |
 | --- | --- | --- |
@@ -514,18 +478,18 @@ pytest tests/ -v
 | `test_model.py` | 13 | expected-value math, threshold selection, recommender invariants |
 | `test_drift.py` | 18 | PSI correctness, and the shifts the detector is required to catch |
 | `test_evaluate_recommender.py` | 20 | ranking metrics, leave-one-out splitting, bootstrap/McNemar significance tests |
-| `test_dashboard.py` | 5 | `column_importances`/SHAP behave correctly on both a raw pipeline and a `CalibratedClassifierCV` wrapper |
+| `test_dashboard_queries.py` | 9 | `column_importances`/SHAP behave correctly on both a raw pipeline and a `CalibratedClassifierCV` wrapper, plus the rest of the dashboard-facing warehouse reads |
 | `test_agents.py` | 28 | AI Agent Layer: prompt grounding in real SHAP/metrics data, retry/backoff on rate limits, graceful fallback on failure (Groq fully mocked) |
 
 ## Production hardening
 
 Everything below is real, working configuration and code - not aspirational. None of it requires provisioning a new paid service to be useful; each piece degrades gracefully to "off" if its optional env var is unset, same convention as the AI Agent Layer and the model registry above.
 
-**TLS.** Automatic and free wherever this project actually deploys: Render (the API and the Next.js frontend, see step 7 above) and Streamlit Community Cloud (the dashboard, step 6) all terminate TLS at their own edge - no certificate config needed for any of them. [`docker/Caddyfile`](docker/Caddyfile) + the `caddy` service (`docker compose --profile production up -d caddy`) covers the one case those don't: self-hosting this stack directly on your own server with a real domain. Needs `API_DOMAIN`/`DASHBOARD_DOMAIN`/`FRONTEND_DOMAIN` set to real DNS A records pointing at the host - Caddy handles Let's Encrypt issuance and renewal automatically from there.
+**TLS.** Automatic and free wherever this project actually deploys: Render (the API and the Next.js frontend, see step 6 above) terminates TLS at its own edge - no certificate config needed. [`docker/Caddyfile`](docker/Caddyfile) + the `caddy` service (`docker compose --profile production up -d caddy`) covers the one case that doesn't: self-hosting this stack directly on your own server with a real domain. Needs `API_DOMAIN`/`FRONTEND_DOMAIN` set to real DNS A records pointing at the host - Caddy handles Let's Encrypt issuance and renewal automatically from there.
 
-**Secrets.** No dedicated secrets-manager tool (Vault, Doppler, etc.) - deliberately, matching this project's existing "avoid unnecessary infrastructure" pattern (see the AI Customer Intelligence plan doc's own instruction to that effect, followed elsewhere for the same reason - e.g. no Redis, no separate queue). Every real deployment surface already has its own encrypted secret store: Render's env var UI (`sync: false` entries in `render.yaml` prompt for these rather than committing them), Streamlit Cloud's Secrets UI (`.streamlit/secrets.toml.example`), and locally, `.env` (gitignored, never committed - verified: `git log --all -- .env` shows nothing). Nothing in this repo hardcodes a credential; every `POSTGRES_PASSWORD`/`GROQ_API_KEY`/etc. is read from the environment (`os.environ.get(...)` throughout, e.g. `src/warehouse.py`).
+**Secrets.** No dedicated secrets-manager tool (Vault, Doppler, etc.) - deliberately, matching this project's existing "avoid unnecessary infrastructure" pattern (followed elsewhere for the same reason - e.g. no Redis, no separate queue). Every real deployment surface already has its own encrypted secret store: Render's env var UI (`sync: false` entries in `render.yaml` prompt for these rather than committing them), and locally, `.env` (gitignored, never committed - verified: `git log --all -- .env` shows nothing). Nothing in this repo hardcodes a credential; every `POSTGRES_PASSWORD`/`GROQ_API_KEY`/etc. is read from the environment (`os.environ.get(...)` throughout, e.g. `src/warehouse.py`).
 
-**CI/CD.** [`.github/workflows/ci.yml`](.github/workflows/ci.yml) (pre-existing) runs the test suite on every push/PR. [`.github/workflows/cd.yml`](.github/workflows/cd.yml) (new) builds and pushes the `api`/`dashboard` Docker images to GitHub Container Registry after CI passes on `main` - tagged both `latest` and the commit SHA, so a specific deploy is always traceable/rollback-able. It deliberately triggers off CI's own success (`workflow_run`) rather than duplicating the test job, so there's one source of truth for "does this pass."
+**CI/CD.** [`.github/workflows/ci.yml`](.github/workflows/ci.yml) (pre-existing) runs the test suite on every push/PR. [`.github/workflows/cd.yml`](.github/workflows/cd.yml) builds and pushes the `api`/`frontend` Docker images to GitHub Container Registry after CI passes on `main` - tagged both `latest` and the commit SHA, so a specific deploy is always traceable/rollback-able. It deliberately triggers off CI's own success (`workflow_run`) rather than duplicating the test job, so there's one source of truth for "does this pass."
 
 **Horizontal scaling.** Verified `src/model/api.py` is safe to run as multiple replicas before writing any scaling config: it never writes to local disk at request time (grepped for it - nothing outside the read-only `models_store/` mount), and everything it does persist (AI traces, the LLM explanation cache, drift results) already goes to the shared Postgres database, not process-local state. `render.yaml` documents the one-line change (`numInstances`) to turn this on - commented out by default since it needs a paid Render plan, not the free tier this repo otherwise assumes.
 
@@ -547,7 +511,7 @@ Everything below is real, working configuration and code - not aspirational. Non
 | Explainability | SHAP (TreeExplainer) |
 | AI Agent Layer | Groq (`openai/gpt-oss-120b` / `-20b`), presentation only - see [AI Agent Layer](#ai-agent-layer) |
 | Model serving | FastAPI |
-| Dashboard | Streamlit, Plotly |
+| Frontend | Next.js (App Router), TypeScript, Tailwind CSS, Recharts |
 | Containerization | Docker, docker-compose |
 | CI/CD | GitHub Actions |
 | Testing | pytest, dbt tests |
@@ -571,7 +535,7 @@ Everything below was actually run and checked during the build, not just written
   The deployed model trains on a 150,000-row sample because the retrain task runs in-process under Airflow's LocalExecutor on a 3.8GB Docker VM and was SIGKILLed at full scale (see Deviations); AUC was measured to be flat at 0.65–0.68 across sample sizes, so the cap costs little. Its full test-set metrics: precision 0.160, recall 0.600, F1 0.253, threshold 0.105 (moved from an earlier 0.451 once the model's probabilities were calibrated — see below; the operating point itself, precision/recall, is unchanged). See "Limitations" and `report/findings.md` — this is still a modest model, and that's discussed honestly, not hidden.
 - **Recommender**: only ever recommends services the customer doesn't already have, ranked by neighbour popularity, and this is now backed by a real offline evaluation rather than a spot-checked example — see [Recommender evaluation](#recommender-evaluation). It is retrained by the DAG on the same trigger as the churn model — previously it wasn't retrained at all, so its artifact had aged 9 hours behind the churn model and was still built from 2 batches' worth of customers rather than 13. Retraining at the full 1,000,000-row scale was verified inside the `airflow-scheduler` container: it samples a bounded 150,000-profile reference set, produces a **9.9MB** artifact (down from 17MB), and the API loads it at **206MB of its 400MB limit** with `/recommend` coverage still 40/40 on random real customers.
 - **FastAPI**: both endpoints tested with a real customer's data pulled from the warehouse. `/recommend` coverage was re-verified after the warehouse-fallback fix on 40 randomly sampled real customer IDs — 40/40 returned recommendations, against ~15% before the fix — while an ID that genuinely doesn't exist still returns 404 and the container stayed at 258MB of its 400MB limit. `/predict-churn` returned a probability consistent with that customer's actual (held-out) label; `/recommend` returned 3 ranked un-subscribed services; a 404 for an unknown `customer_id` was also verified. Re-tested after the DAG's auto-retrain to confirm the API correctly picks up and serves the newest versioned artifact — this is also what surfaced the `dill` cross-environment issue above.
-- **Streamlit dashboard**: verified headlessly via Streamlit's `AppTest` runner *and* by driving the running container with headless Chromium, capturing all five views (the screenshots in this README are those captures). The browser pass found two layout defects `AppTest` structurally could not — a KPI truncated to `$26,051...` and a clipped SHAP column — both since fixed. Peak container memory during a full five-view capture: 652MB against its 2GB limit.
+- **Streamlit dashboard** *(retired - this platform's original UI, since replaced by the Next.js frontend under [`frontend/`](frontend/))*: verified headlessly via Streamlit's `AppTest` runner *and* by driving the running container with headless Chromium, capturing all five views (the historical screenshots this produced were removed from the repo along with the retired app - see git history for them). The browser pass found two layout defects `AppTest` structurally could not — a KPI truncated to `$26,051...` and a clipped SHAP column — both since fixed. Peak container memory during a full five-view capture: 652MB against its 2GB limit.
 - **pytest**: 63/63 pass locally, and the same `pytest tests/` command is green on GitHub Actions — most recently on commit `7508e15`, the commit that added the recommender-evaluation and calibration-regression tests, with the dependency-install step (lightgbm, shap, dill) succeeding on a clean Ubuntu runner. Covers ingestion logic, expected-value/threshold math, recommender invariants, PSI drift, recommender evaluation metrics, and the calibration/SHAP artifact-shape regression.
 - **Probability calibration**: verified with a genuine train/calibration/test three-way split (never reusing test data for calibration). Brier score improved from 0.196 (worse than the 0.090 always-base-rate baseline) to 0.087 (better than it); mean predicted probability moved from 0.408 to 0.100 against an actual rate of 0.100. AUC confirmed unchanged (0.6693 before and after, since sigmoid scaling is monotonic). The expected-value threshold analysis was fully recomputed on the calibrated model at the same 200,000-row test-set scale as the original analysis (not spot-checked) — see `report/findings.md` Section 6.
 - **Recommender evaluation**: 4,918 evaluation customers, drawn entirely outside the k-NN reference set, scored with leave-one-out hit-rate/MRR against popularity and random baselines. k-NN's edge over popularity (+2.5% MRR) confirmed significant by both a paired bootstrap (95% CI entirely above zero) and an exact McNemar test (p = 2.3×10⁻⁹) — not just eyeballed off a metrics table.
@@ -624,7 +588,7 @@ Everything below was actually run and checked during the build, not just written
 - **Churn model performance is modest, and this was investigated, not assumed.** A dedicated experiment (`notebooks/model_dev_offline.py`) compared 4 model families, SMOTE vs. class-weighting, and cross-validated the winner on the full 1M-row dataset. Best result: LightGBM, AUC 0.683 ± 0.002 (5-fold CV) — a small, real improvement over the original RandomForest (0.677), but nothing tried closes the gap to a "strong" classifier. This looks like a genuine ceiling in the synthetic data's individual-level signal (segment-level signal is much stronger — e.g. contract type alone separates a 4.8x churn-rate gap) rather than a fixable modeling gap.
 - **`/recommend` answers for any customer in the warehouse, but not identically fast for all of them.** The recommender's k-NN reference set is deliberately bounded (~154K profiles) to keep the artifact small; a customer outside it (about 85% of the 1M, so the normal case) triggers one indexed warehouse lookup and is then matched against that index. Coverage is 100% — verified on a random sample of 40 real customer IDs — but those requests do touch Postgres, unlike `/predict-churn`, which remains purely in-memory.
 - **Per-customer explanations are real SHAP values, computed only for the displayed subset.** `TreeExplainer` runs against the bounded set of rows actually on screen (at most 500), never the full 1M-row table — an intentional cost/scale trade-off, not a full-population attribution.
-- **Dashboard verification now includes real browser screenshots** (headless Chromium via Playwright against the running container — every image in [The dashboard](#the-dashboard) is a live capture), in addition to Streamlit's `AppTest` runner. Two rendering defects were found and fixed this way that `AppTest` could not surface, because both were layout problems rather than exceptions: a KPI value truncated to `$26,051...`, and the SHAP column clipped mid-phrase.
+- **The retired Streamlit dashboard's verification included real browser screenshots** (headless Chromium via Playwright against the running container), in addition to Streamlit's `AppTest` runner. Two rendering defects were found and fixed this way that `AppTest` could not surface, because both were layout problems rather than exceptions: a KPI value truncated to `$26,051...`, and the SHAP column clipped mid-phrase.
 - **This machine's network was unusually slow throughout the build** (a 40MB Kaggle download took ~11 minutes; the Airflow Docker image took well over an hour to build, twice, due to the sqlalchemy-pin fix requiring a second build). If you rebuild on a faster connection, expect this to go much quicker.
 - **The AI Agent Layer is a presentation layer over frozen predictions, not a modeling improvement** - it never sees a feature the model didn't already use, and it cannot change a churn probability, a SHAP ranking, or a recommendation. Two real, specific caveats from live verification: (1) SHAP factor names for categorical features collapse to the base column (e.g. "contract", not "month-to-month") because that mapping is pre-existing and shared with the dashboard's SHAP column, so an explanation can say a factor matters without saying which value of it does; (2) the exact Groq model IDs pinned here (`openai/gpt-oss-120b`/`-20b`) are a live external dependency that already moved once during this project (see Deviations) and could again - unlike a pinned pip package, there's no local copy to fall back to, only the graceful-degradation-to-raw-data behavior this layer was built with from the start.
 - **The Neon side of the public demo deployment is now verified against a real, live account** (this session still has no cloud credentials of its own - account creation genuinely needed a human - but once the connection string existed, the migration and the dashboard were both run for real against it, not a substitute). The one number that remains genuinely unverified is first-load latency on the actual Streamlit Community Cloud deployment: this development machine measured ~8 minutes for the full 1,000,000-row query against Neon's `us-east-2` region, but that measurement is from wherever this machine physically is, not from Streamlit Cloud's own (US-based, likely much closer to `us-east-2`) infrastructure - see Verified state and Deviations for the full measurement and why the two numbers likely differ substantially.

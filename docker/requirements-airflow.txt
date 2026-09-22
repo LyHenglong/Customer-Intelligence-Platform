@@ -1,7 +1,7 @@
 # Subset of requirements.txt actually needed by DAG tasks (ingest, DuckDB
 # processing, dbt run/test, model train/retrain). Deliberately excludes
-# fastapi/uvicorn/streamlit/plotly/pytest to keep the Airflow image lean
-# on an 8GB RAM dev machine.
+# fastapi/uvicorn/pytest to keep the Airflow image lean on an 8GB RAM
+# dev machine.
 #
 # No sqlalchemy pin here on purpose: our own code no longer imports
 # sqlalchemy at all (train_churn.py/train_recommender.py use raw psycopg2
@@ -21,12 +21,12 @@ joblib==1.4.2
 scipy==1.14.1
 python-dotenv==1.0.1
 # Pinned to match Airflow's own bundled version, so a model trained here
-# and one trained/loaded elsewhere (API, dashboard, local scripts, which
-# also pin this exact version in requirements.txt) stay pickle-compatible.
+# and one trained/loaded elsewhere (API, local scripts, which also pin
+# this exact version in requirements.txt) stay pickle-compatible.
 dill==0.3.1.1
 # AI Agent Layer (src/agents/): the retrain-summary agent runs as a DAG
 # task (summarize_retrain), so the scheduler needs this even though it
-# doesn't need shap (that's dashboard/API only, for per-customer SHAP).
+# doesn't need shap (that's API-only, for per-customer SHAP).
 groq==1.7.0
 # Model registry/tracking client (retrain_churn_model/retrain_recommender
 # tasks log to MLflow) - mlflow-skinny specifically, NOT full mlflow: full

@@ -6,9 +6,8 @@
 # module-scoped singletons, and every RAG test monkeypatches them out
 # (see tests/test_ai_rag_hybrid_search.py, tests/test_ai_rag_ingest.py).
 # Installing it here would only slow CI down for coverage it doesn't add
-# - the same reasoning as requirements-streamlit-cloud.txt and
-# docker/requirements-airflow.txt trimming out what their runtime never
-# imports.
+# - the same reasoning as docker/requirements-airflow.txt trimming out
+# what its runtime never imports.
 #
 # Same reasoning as requirements-airflow.txt for the missing sqlalchemy
 # pin: not used.
@@ -27,8 +26,6 @@ dill==0.3.1.1
 fastapi==0.115.5
 uvicorn[standard]==0.32.1
 pydantic==2.10.2
-streamlit==1.40.1
-plotly==5.24.1
 shap==0.46.0
 groq==1.7.0
 kaggle==1.6.17

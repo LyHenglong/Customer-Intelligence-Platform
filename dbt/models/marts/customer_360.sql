@@ -1,7 +1,7 @@
 -- Customer 360: one row per customer, consolidating demographics, account
 -- info, service subscriptions, usage/engagement, value segmentation, and
 -- the churn label into a single table. This is the sole read path for both
--- ML training (churn + recommender) and the Streamlit dashboard - nothing
+-- ML training (churn + recommender) and the serving layer - nothing
 -- downstream should need to join staging/intermediate models directly.
 select
     dem.customer_id,

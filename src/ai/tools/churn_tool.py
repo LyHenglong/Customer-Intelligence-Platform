@@ -1,12 +1,12 @@
 """churn_analysis tool - population-level churn statistics.
 
 Streams marts.customer_360 through the churn model in bounded batches -
-the same memory-safety pattern as src/dashboard/app.py's
+the same memory-safety pattern as src/model/dashboard_queries.py's
 score_all_customers, reimplemented independently here rather than
-imported, since importing src.dashboard.app would pull Streamlit into the
-AI/API layer's dependency chain for a function it doesn't otherwise need.
-Optional SQL filters narrow the population before scoring, mirroring
-customer_search's SQL-first approach.
+imported, since this tool also accepts optional SQL filters to narrow
+the population before scoring (mirroring customer_search's SQL-first
+approach) - a capability score_all_customers doesn't have, since it
+always scores the full, unfiltered population.
 """
 
 from __future__ import annotations

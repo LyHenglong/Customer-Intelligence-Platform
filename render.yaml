@@ -1,10 +1,8 @@
 # Render Blueprint (https://render.com/docs/blueprint-spec) for the FastAPI
 # serving layer (src/model/api.py) - deploys docker/Dockerfile.api as a
-# standalone web service, reachable from anywhere, so the dashboard's AI
-# Decision Assistant tab has a backend to call even when the dashboard
-# itself is running on Streamlit Community Cloud (which has no way to also
-# run a second, separate service alongside it - see README's "Public demo
-# deployment" section for why that tab is otherwise unavailable there).
+# standalone web service, reachable from anywhere, so the Next.js
+# frontend's AI Decision Assistant tab (and every other dashboard-facing
+# endpoint it calls) has a backend to reach.
 #
 # Not auto-deployed by anything in this repo - a human connects this repo
 # on render.com (New -> Blueprint) and Render reads this file from there.
@@ -14,8 +12,8 @@
 #
 # Env vars marked `sync: false` are secrets/host-specific values Render
 # will prompt for at Blueprint creation time rather than auto-generating -
-# point these at the same Neon project used for the Streamlit Cloud
-# dashboard deploy (see README step 6), so both surfaces read the same
+# point these at the same Neon project the frontend/warehouse use (see
+# README step 6), so both this API and any local/dev usage read the same
 # warehouse.
 #
 # Horizontal scaling (`numInstances` below, commented out): verified
@@ -77,9 +75,7 @@ services:
     name: telecom-churn-frontend
     # The Next.js frontend (frontend/) - see README's "Deploying the API
     # and the Next.js frontend to Render" section for why this and the
-    # API above exist as their own Render services rather than
-    # everything running as one process (Streamlit Cloud, which hosts
-    # the dashboard, can't also run a second service alongside it).
+    # API above exist as their own Render services.
     runtime: docker
     dockerfilePath: ./docker/Dockerfile.frontend
     dockerContext: .
