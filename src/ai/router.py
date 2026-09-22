@@ -56,6 +56,16 @@ _SEGMENT_PATTERNS: tuple[tuple[str, str, str], ...] = (
 )
 _SEGMENT_COMPILED = tuple((col, val, re.compile(rx)) for col, val, rx in _SEGMENT_PATTERNS)
 
+# Questions asking what *drives* churn rather than how much of it there
+# is. These get the model's feature importances attached as evidence -
+# without them "what are the biggest risk factors for churn?" collected
+# only aggregate rates, and the answer honestly reported that the
+# evidence named no drivers.
+_DRIVER_PATTERN = re.compile(
+    r"\b(?:risk factors?|driv(?:e|es|er|ers|ing)|causes?|caused by|why|what makes|"
+    r"most important|biggest factors?|contributing|influenc\w*|predicts?|predictors?)\b"
+)
+
 
 def _keyword_pattern(keywords: tuple[str, ...]) -> re.Pattern:
     # \b-bounded, not a bare substring check: "rate" as a plain `in` test
@@ -106,6 +116,9 @@ def classify_with_signals(query: str) -> tuple[str, dict]:
         # phrase narrows the evidence a route gathers, it doesn't pick the
         # route. "month-to-month customers" alone is still UNSUPPORTED.
         "segment_filters": _extract_segment_filters(text),
+        # Same: adds feature-importance evidence within the ML route
+        # rather than selecting a route of its own.
+        "asks_for_drivers": _matches_any(text, _DRIVER_PATTERN),
     }
 
     if not text:

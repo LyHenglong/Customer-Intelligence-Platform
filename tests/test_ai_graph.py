@@ -37,6 +37,15 @@ def captured_traces(monkeypatch):
     return calls
 
 
+@pytest.fixture(autouse=True)
+def _no_real_artifact_load(monkeypatch):
+    """Driver-style questions ("risk factors", "why...") attach the churn
+    model's feature importances, which loads a real joblib artifact off
+    disk/MLflow. Off by default here for the same reason every other tool
+    is stubbed; the test that covers it patches the gatherer directly."""
+    monkeypatch.setattr(graph_module, "load_churn_artifact", lambda: (None, None))
+
+
 class _FakeProvider:
     def __init__(self, responses=None, raise_on_call=False):
         self.responses = list(responses or [])
@@ -153,9 +162,53 @@ class TestMLAnalysisRoute:
         result = graph_module.run_query("What are the biggest risk factors for churn?")
 
         assert result.route == "ML_ANALYSIS"
-        assert result.tools_used == ["churn_analysis"]
+        # "risk factors" is a driver question, so feature importances are
+        # attempted too - they yield nothing here because the artifact
+        # loader is stubbed out (see _no_real_artifact_load).
+        assert result.tools_used == ["feature_importances", "churn_analysis"]
         assert result.model_version == "V2"
         assert len(result.evidence) == 1
+
+    def test_driver_questions_attach_feature_importances_as_evidence(self, monkeypatch):
+        """The platform already computes these for the Overview page; before
+        this they were never handed to the assistant, so "what are the
+        biggest risk factors" got aggregate rates and an honest "the
+        evidence names no drivers"."""
+        monkeypatch.setattr(graph_module, "churn_analysis", lambda filters=None: ChurnAnalysisResult(
+            population_size=1000, current_churn_rate=0.1, predicted_high_risk_count=120,
+            mean_churn_probability=0.15, median_churn_probability=0.12,
+            model_version="V2", threshold=0.11, filters_applied={},
+        ))
+        monkeypatch.setattr(
+            graph_module, "load_churn_artifact",
+            lambda: ({"pipeline": object()}, "V2"),
+        )
+        monkeypatch.setattr(
+            graph_module, "column_importances",
+            lambda pipeline: {"contract": 0.40, "tenure": 0.25, "num_complaints": 0.10},
+        )
+        fake = _FakeProvider(responses=["Contract type and tenure matter most."])
+        monkeypatch.setattr(graph_module, "get_llm_provider", lambda: fake)
+
+        result = graph_module.run_query("What are the biggest risk factors for churn?")
+
+        assert "feature_importances" in result.tools_used
+        importance_evidence = [e for e in result.evidence if "weighs most heavily" in e.claim]
+        assert len(importance_evidence) == 1
+        # Ranked most-important-first, so the model reads them in order.
+        assert importance_evidence[0].value.startswith("contract (importance 0.4000)")
+
+    def test_counting_questions_skip_feature_importances(self, monkeypatch):
+        monkeypatch.setattr(graph_module, "churn_analysis", lambda filters=None: ChurnAnalysisResult(
+            population_size=1000, current_churn_rate=0.1, predicted_high_risk_count=120,
+            mean_churn_probability=0.15, median_churn_probability=0.12,
+            model_version="V2", threshold=0.11, filters_applied={},
+        ))
+        monkeypatch.setattr(graph_module, "get_llm_provider", lambda: _FakeProvider(responses=["120 are at risk."]))
+
+        result = graph_module.run_query("how many customers are predicted at risk")
+
+        assert "feature_importances" not in result.tools_used
 
     def test_empty_population_yields_insufficient_evidence(self, monkeypatch):
         monkeypatch.setattr(graph_module, "churn_analysis", lambda filters=None: ChurnAnalysisResult(

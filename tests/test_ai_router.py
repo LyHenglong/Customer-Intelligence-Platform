@@ -58,6 +58,7 @@ def test_signals_report_false_when_nothing_matches():
     assert signals == {
         "has_customer_id": False, "has_sql": False, "has_ml": False,
         "has_rag": False, "customer_id": None, "segment_filters": {},
+        "asks_for_drivers": False,
     }
 
 
@@ -105,6 +106,22 @@ def test_tenure_phrases_require_adjacency_and_degrade_safely():
 def test_first_match_per_column_wins_so_comparisons_do_not_contradict():
     _, signals = classify_with_signals("compare month-to-month against two-year risk factors")
     assert signals["segment_filters"]["contract"] == "month_to_month"
+
+
+def test_driver_questions_are_flagged_for_feature_importance_evidence():
+    for query in (
+        "What are the biggest risk factors for churn?",
+        "What drives churn?",
+        "Why do customers leave?",
+        "Which features predict churn best?",
+    ):
+        _, signals = classify_with_signals(query)
+        assert signals["asks_for_drivers"] is True, query
+
+
+def test_counting_questions_are_not_driver_questions():
+    _, signals = classify_with_signals("How many customers are at risk?")
+    assert signals["asks_for_drivers"] is False
 
 
 def test_a_segment_phrase_alone_does_not_create_a_route():

@@ -47,9 +47,11 @@ from src.ai.router import (
     classify_with_signals,
 )
 from src.ai.schemas import AssistantResponse, Citation, Evidence
+from src.ai.tools._artifacts import load_churn_artifact
 from src.ai.tools.churn_tool import churn_analysis
 from src.ai.tools.customer_tool import customer_lookup
 from src.ai.tools.sql_tool import run_sql
+from src.model.dashboard_queries import column_importances
 
 log = logging.getLogger("ai.graph")
 
@@ -184,6 +186,32 @@ def _gather_sql_evidence(query: str):
 
 def _describe_segment(filters: dict[str, str]) -> str:
     return ", ".join(f"{col}={val}" for col, val in sorted(filters.items()))
+
+
+def _gather_feature_importance_evidence(top_k: int = 6) -> list[Evidence]:
+    """Which columns the churn model actually leans on, reusing the same
+    column_importances() that powers the frontend's Overview page.
+
+    Without this, "what are the biggest risk factors for churn?" gathered
+    only aggregate rates and the model correctly answered that the
+    evidence named no drivers - the platform knew the answer, the
+    assistant just wasn't given it. Model-level importances, not SHAP:
+    SHAP here is per-customer (see src/ai/tools/shap_tool.py, reached via
+    customer_lookup when a question names a customer)."""
+    artifact, version = load_churn_artifact()
+    if artifact is None:
+        return []
+    pipeline = artifact.get("base_pipeline", artifact.get("pipeline"))
+    importances = column_importances(pipeline) if pipeline is not None else {}
+    if not importances:
+        return []
+
+    ranked = sorted(importances.items(), key=lambda kv: kv[1], reverse=True)[:top_k]
+    return [Evidence(
+        type="model", source=f"churn model {version}",
+        claim="Features the churn model weighs most heavily, most important first",
+        value=", ".join(f"{col} (importance {imp:.4f})" for col, imp in ranked),
+    )]
 
 
 def _gather_ml_evidence(filters: dict[str, str] | None = None) -> tuple[list[Evidence], list[Citation], str | None]:
@@ -342,6 +370,14 @@ def run_query(query: str) -> AssistantResponse:
                 llm_calls.append(agent_response)
 
     if route == ML_ANALYSIS or (route == MULTI_SOURCE and signals["has_ml"]):
+        if signals["asks_for_drivers"]:
+            tools_used.append("feature_importances")
+            importance_evidence = _run_timed(
+                tool_latency, errors, "feature_importances", _gather_feature_importance_evidence,
+            )
+            if importance_evidence:
+                evidence += importance_evidence
+
         tools_used.append("churn_analysis")
         result = _run_timed(
             tool_latency, errors, "churn_analysis",
