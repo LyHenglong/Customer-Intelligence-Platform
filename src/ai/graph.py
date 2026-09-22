@@ -182,23 +182,55 @@ def _gather_sql_evidence(query: str):
     return evidence, citations, sql_result, agent_response
 
 
-def _gather_ml_evidence() -> tuple[list[Evidence], list[Citation], str | None]:
-    result = churn_analysis()
+def _describe_segment(filters: dict[str, str]) -> str:
+    return ", ".join(f"{col}={val}" for col, val in sorted(filters.items()))
+
+
+def _gather_ml_evidence(filters: dict[str, str] | None = None) -> tuple[list[Evidence], list[Citation], str | None]:
+    """Scopes the churn statistics to the segment the question asked about
+    (see src/ai/router.py's segment_filters). The segment is named in the
+    evidence's own claim text, so the generating model can state which
+    population a number describes instead of implying it covers everyone."""
+    filters = filters or {}
+    result = churn_analysis(filters=filters or None)
     if result.population_size == 0:
         return [], [], None
+
+    scope = _describe_segment(filters) if filters else "all customers"
     evidence = [Evidence(
         type="model", source=f"churn model {result.model_version}",
-        claim="Population-level churn statistics",
+        claim=f"Churn statistics for {scope}",
         value=(
+            f"segment={scope}, "
             f"current_churn_rate={result.current_churn_rate}, "
             f"predicted_high_risk_count={result.predicted_high_risk_count}, "
             f"population_size={result.population_size}"
         ),
     )]
     citations = [Citation(
-        label=f"[Churn Model {result.model_version}, population stats]",
+        label=f"[Churn Model {result.model_version}, {scope}]",
         type="model", source=result.model_version or "unknown",
     )]
+
+    # A segment question is implicitly comparative ("why is churn worse for
+    # X?" means worse *than the rest*), so the population baseline rides
+    # along - otherwise the model has a single number and nothing to judge
+    # it against, and answers "the rate is 0.28" without saying that's ~3x
+    # the overall rate.
+    if filters:
+        overall = churn_analysis()
+        if overall.population_size:
+            evidence.append(Evidence(
+                type="model", source=f"churn model {overall.model_version}",
+                claim="Whole-population baseline, for comparison against the segment above",
+                value=(
+                    f"segment=all customers, "
+                    f"current_churn_rate={overall.current_churn_rate}, "
+                    f"predicted_high_risk_count={overall.predicted_high_risk_count}, "
+                    f"population_size={overall.population_size}"
+                ),
+            ))
+
     return evidence, citations, result.model_version
 
 
@@ -311,7 +343,10 @@ def run_query(query: str) -> AssistantResponse:
 
     if route == ML_ANALYSIS or (route == MULTI_SOURCE and signals["has_ml"]):
         tools_used.append("churn_analysis")
-        result = _run_timed(tool_latency, errors, "churn_analysis", _gather_ml_evidence)
+        result = _run_timed(
+            tool_latency, errors, "churn_analysis",
+            lambda: _gather_ml_evidence(signals["segment_filters"]),
+        )
         if result is not None:
             e, c, mv = result
             evidence += e

@@ -57,9 +57,59 @@ def test_signals_report_false_when_nothing_matches():
     _, signals = classify_with_signals("hello there")
     assert signals == {
         "has_customer_id": False, "has_sql": False, "has_ml": False,
-        "has_rag": False, "customer_id": None,
+        "has_rag": False, "customer_id": None, "segment_filters": {},
     }
 
 
 def test_classify_is_case_insensitive():
     assert classify("WHAT DOES OUR POLICY SAY") == RAG_SEARCH
+
+
+# ------------------------------------------------- segment filter extraction
+
+
+def test_month_to_month_phrasing_extracts_a_contract_filter():
+    _, signals = classify_with_signals("Why is churn increasing among month-to-month customers?")
+    assert signals["segment_filters"] == {"contract": "month_to_month"}
+
+
+def test_segment_phrases_map_to_warehouse_values():
+    cases = {
+        "why are two year contracts churning": {"contract": "two_year"},
+        "risk factors for our one-year customers": {"contract": "one_year"},
+        "why do new customers churn": {"tenure_bucket": "new_0_6mo"},
+        "churn probability for loyal customers": {"tenure_bucket": "loyal_24mo_plus"},
+    }
+    for query, expected in cases.items():
+        _, signals = classify_with_signals(query)
+        assert signals["segment_filters"] == expected, query
+
+
+def test_contract_and_tenure_phrases_combine():
+    _, signals = classify_with_signals("churn probability for new customers on month-to-month")
+    assert signals["segment_filters"] == {
+        "contract": "month_to_month", "tenure_bucket": "new_0_6mo",
+    }
+
+
+def test_tenure_phrases_require_adjacency_and_degrade_safely():
+    """"new ... customers" with words in between matches only the contract.
+    Deliberate: the alternative is a looser pattern that would read "new"
+    in unrelated phrasings and silently answer about the wrong population.
+    Missing a filter yields a broader, correctly-labelled answer; inventing
+    one yields a confidently wrong one."""
+    _, signals = classify_with_signals("churn probability for new month-to-month customers")
+    assert signals["segment_filters"] == {"contract": "month_to_month"}
+
+
+def test_first_match_per_column_wins_so_comparisons_do_not_contradict():
+    _, signals = classify_with_signals("compare month-to-month against two-year risk factors")
+    assert signals["segment_filters"]["contract"] == "month_to_month"
+
+
+def test_a_segment_phrase_alone_does_not_create_a_route():
+    """segment_filters narrows evidence within a route; it must not be
+    what promotes an otherwise-unsupported question into one."""
+    route, signals = classify_with_signals("month-to-month")
+    assert signals["segment_filters"] == {"contract": "month_to_month"}
+    assert route == UNSUPPORTED

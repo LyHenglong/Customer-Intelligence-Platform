@@ -142,7 +142,7 @@ class TestSQLAnalysisRoute:
 
 class TestMLAnalysisRoute:
     def test_population_stats_become_evidence(self, monkeypatch):
-        monkeypatch.setattr(graph_module, "churn_analysis", lambda: ChurnAnalysisResult(
+        monkeypatch.setattr(graph_module, "churn_analysis", lambda filters=None: ChurnAnalysisResult(
             population_size=1000, current_churn_rate=0.1, predicted_high_risk_count=120,
             mean_churn_probability=0.15, median_churn_probability=0.12,
             model_version="V2", threshold=0.11, filters_applied={},
@@ -158,7 +158,7 @@ class TestMLAnalysisRoute:
         assert len(result.evidence) == 1
 
     def test_empty_population_yields_insufficient_evidence(self, monkeypatch):
-        monkeypatch.setattr(graph_module, "churn_analysis", lambda: ChurnAnalysisResult(
+        monkeypatch.setattr(graph_module, "churn_analysis", lambda filters=None: ChurnAnalysisResult(
             population_size=0, current_churn_rate=0.0, predicted_high_risk_count=0,
             mean_churn_probability=0.0, median_churn_probability=0.0,
             model_version=None, threshold=0.0, filters_applied={},
@@ -218,7 +218,7 @@ class TestMultiSourceRoute:
 
 class TestGenerationFallback:
     def test_llm_failure_falls_back_to_a_templated_evidence_summary(self, monkeypatch):
-        monkeypatch.setattr(graph_module, "churn_analysis", lambda: ChurnAnalysisResult(
+        monkeypatch.setattr(graph_module, "churn_analysis", lambda filters=None: ChurnAnalysisResult(
             population_size=1000, current_churn_rate=0.1, predicted_high_risk_count=120,
             mean_churn_probability=0.15, median_churn_probability=0.12,
             model_version="V2", threshold=0.11, filters_applied={},
@@ -254,7 +254,7 @@ class TestTracing:
         assert trace["output_tokens"] == 0
 
     def test_grounded_answer_records_tool_latency_tokens_and_model(self, monkeypatch, captured_traces):
-        monkeypatch.setattr(graph_module, "churn_analysis", lambda: ChurnAnalysisResult(
+        monkeypatch.setattr(graph_module, "churn_analysis", lambda filters=None: ChurnAnalysisResult(
             population_size=1000, current_churn_rate=0.1, predicted_high_risk_count=120,
             mean_churn_probability=0.15, median_churn_probability=0.12,
             model_version="V2", threshold=0.11, filters_applied={},
@@ -275,7 +275,7 @@ class TestTracing:
         assert trace["error"] is None
 
     def test_ungrounded_answer_marks_fallback_in_the_trace(self, monkeypatch, captured_traces):
-        monkeypatch.setattr(graph_module, "churn_analysis", lambda: ChurnAnalysisResult(
+        monkeypatch.setattr(graph_module, "churn_analysis", lambda filters=None: ChurnAnalysisResult(
             population_size=1000, current_churn_rate=0.1, predicted_high_risk_count=120,
             mean_churn_probability=0.15, median_churn_probability=0.12,
             model_version="V2", threshold=0.11, filters_applied={},
@@ -290,7 +290,7 @@ class TestTracing:
         assert trace["fallback_status"] is True
 
     def test_llm_call_failure_marks_fallback_in_the_trace(self, monkeypatch, captured_traces):
-        monkeypatch.setattr(graph_module, "churn_analysis", lambda: ChurnAnalysisResult(
+        monkeypatch.setattr(graph_module, "churn_analysis", lambda filters=None: ChurnAnalysisResult(
             population_size=1000, current_churn_rate=0.1, predicted_high_risk_count=120,
             mean_churn_probability=0.15, median_churn_probability=0.12,
             model_version="V2", threshold=0.11, filters_applied={},
@@ -304,7 +304,7 @@ class TestTracing:
         assert trace["llm_model"] is None  # the failed call produced no AgentResponse to read a model from
 
     def test_a_failing_tool_is_recorded_as_an_error_but_does_not_crash(self, monkeypatch, captured_traces):
-        def _raises():
+        def _raises(filters=None):
             raise RuntimeError("simulated DB outage")
 
         monkeypatch.setattr(graph_module, "churn_analysis", _raises)
