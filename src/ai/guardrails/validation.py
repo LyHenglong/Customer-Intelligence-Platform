@@ -39,9 +39,15 @@ def validate_response(response: AssistantResponse) -> AssistantResponse:
 
     unsupported = find_unsupported_numbers(response.answer, response.evidence)
     if unsupported:
+        # The rejected answer is logged alongside the flagged numbers
+        # because the numbers alone aren't diagnosable: a run that flagged
+        # ['17', '19', '801', '992'] turned out to be 17801/19992 written
+        # with a Unicode space as a thousands separator, which took a
+        # separate repro script to work out.
         log.warning(
             "answer contained number(s) not present in its evidence, falling back to a "
-            "templated summary (trace_id=%s): %s", response.trace_id, unsupported,
+            "templated summary (trace_id=%s): %s | rejected answer: %r",
+            response.trace_id, unsupported, response.answer[:500],
         )
         return response.model_copy(update={
             "answer": templated_evidence_summary(response.evidence),

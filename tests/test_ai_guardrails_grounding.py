@@ -31,6 +31,25 @@ def test_find_unsupported_numbers_flags_a_fabricated_number():
     assert unsupported == ["99"]
 
 
+def test_space_grouped_thousands_normalize_like_comma_grouped_ones():
+    """Real failure: the model wrote 17801/19992 with a narrow no-break
+    space as the thousands separator, so the check saw "17", "801", "19",
+    "992" and rejected a correctly-grounded answer."""
+    for separator in (" ", " ", " ", " ", ","):
+        assert extract_numbers(f"17{separator}801 of 19{separator}992") == {"17801", "19992"}
+
+
+def test_space_grouping_does_not_fuse_unrelated_adjacent_numbers():
+    """Only the thousands shape collapses - a digit, one separator, then
+    exactly three digits. "42 1234" is two numbers, not 421234."""
+    assert extract_numbers("42 1234 apples") == {"42", "1234"}
+
+
+def test_space_separated_grounded_answer_is_not_flagged():
+    evidence = [Evidence(type="model", source="churn model V1", claim="stats", value="predicted_high_risk_count=17801")]
+    assert find_unsupported_numbers("About 17 801 customers are high risk.", evidence) == []
+
+
 def test_find_unsupported_numbers_does_not_recognize_unit_equivalence():
     """Documents the known limitation: exact-text matching cannot see
     that "30%" and "0.3" are the same value - see the module docstring."""

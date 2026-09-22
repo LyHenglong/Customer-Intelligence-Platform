@@ -27,6 +27,20 @@ from src.ai.schemas import Evidence
 
 _NUMBER_RE = re.compile(r"\$?\d[\d,]*(?:\.\d+)?%?")
 
+# Some models group thousands with a space rather than a comma - "17 801"
+# for 17801, often with a Unicode space (NBSP, narrow NBSP, thin space).
+# Those are the same digits in the same order with no arithmetic applied,
+# so they normalize to the same token instead of being reported as two
+# invented numbers ("17" and "801"). This is representation, not the unit
+# equivalence the module docstring deliberately refuses to infer.
+#
+# Only the thousands shape collapses - one separator between a digit and
+# exactly three more digits - so unrelated adjacent numbers ("in 2024 300
+# customers") aren't fused. If that guard ever misfires it produces a
+# number that matches no evidence, i.e. it fails toward the same cautious
+# fallback as before, never toward accepting an unverified claim.
+_THOUSANDS_SEP_RE = re.compile(r"(?<=\d)[      ](?=\d{3}(?!\d))")
+
 # Below this many digits, a token is treated as incidental (a lone digit
 # in prose, an ordinal-style reference) rather than a checkable numeric
 # claim.
@@ -39,7 +53,7 @@ def _normalize(number_token: str) -> str:
 
 def extract_numbers(text: str) -> set[str]:
     numbers = set()
-    for match in _NUMBER_RE.findall(text or ""):
+    for match in _NUMBER_RE.findall(_THOUSANDS_SEP_RE.sub("", text or "")):
         normalized = _normalize(match)
         digit_count = sum(c.isdigit() for c in normalized)
         if digit_count >= _MIN_DIGITS_TO_CHECK:
