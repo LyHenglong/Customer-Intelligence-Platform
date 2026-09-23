@@ -122,7 +122,14 @@ _state: dict = {"churn": None, "churn_version": None, "recommender": None, "reco
 # at one instance regardless).
 _scored_cache: dict = {"data": None, "expires_at": 0.0, "version": None}
 _scored_lock = threading.Lock()
-_SCORED_CACHE_TTL_SECONDS = 600
+# An hour, not the original 10 minutes. The scores this caches only move
+# when a batch is ingested (a manually triggered DAG run here) or a model
+# is promoted - and a model promotion already invalidates this cache
+# independently, since entries are keyed by churn_version. A 10-minute TTL
+# therefore bought no extra freshness in practice, while guaranteeing that
+# any visitor arriving after a quiet spell paid a ~35-110s scoring pass and
+# saturated the single uvicorn worker while doing it.
+_SCORED_CACHE_TTL_SECONDS = 3600
 
 # /at-risk's SHAP + recommendation loop is real per-request CPU work,
 # independent of the (cached) population-scoring pass above. An
@@ -149,6 +156,42 @@ def load_models() -> None:
         log.info("Loaded recommender artifact %s", rec_path.name)
     else:
         log.warning("No recommender artifact found in %s", MODELS_DIR)
+
+
+def _warm_scored_cache() -> None:
+    """Pays the full-population scoring cost at startup instead of making
+    the first visitor wait for it.
+
+    /overview/stats and /at-risk both need every customer scored, which is
+    a single-threaded ~35-110s pass over 1,000,000 rows (the spread is CPU
+    contention - it is slowest when Airflow is running alongside). On a
+    cold cache that cost landed on whoever opened the dashboard first, and
+    since it saturates the one uvicorn worker, every other request queued
+    behind it too. The page said "Scoring the full customer population..."
+    the whole time, which is accurate and still looks broken.
+
+    Runs on a daemon thread so it cannot delay startup or the healthcheck
+    (an unhealthy container would just get restarted, restarting the warm
+    with it). It takes the same lock as a request-path miss, so a visitor
+    arriving mid-warm waits for this pass rather than starting a second
+    one."""
+    if _state["churn"] is None:
+        log.info("skipping scored-cache warm: no churn model loaded")
+        return
+    try:
+        t0 = time.monotonic()
+        rows = len(_get_scored_customers())
+        log.info("scored-cache warm complete: %d customers in %.1fs", rows, time.monotonic() - t0)
+    except Exception:
+        # Deliberately swallowed: this is an optimisation. A failure here
+        # must not stop the API serving - the request path will simply pay
+        # the cost itself, exactly as it did before.
+        log.exception("scored-cache warm failed; first request will pay the scoring cost")
+
+
+@app.on_event("startup")
+def start_cache_warm() -> None:
+    threading.Thread(target=_warm_scored_cache, name="scored-cache-warm", daemon=True).start()
 
 
 def _get_scored_customers() -> pd.DataFrame:

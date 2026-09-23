@@ -23,6 +23,11 @@ from src.ai.schemas import CustomerLookupResult, CustomerProfile, CustomerSearch
 from src.model import api as api_module
 from src.model import dashboard_queries
 
+# Captured before the autouse fixture below replaces the module attribute
+# with a no-op, so the few tests that exercise the warm itself can still
+# reach the real implementation.
+_REAL_WARM_SCORED_CACHE = api_module._warm_scored_cache
+
 
 @pytest.fixture(autouse=True)
 def _isolate_api_state(monkeypatch):
@@ -35,6 +40,14 @@ def _isolate_api_state(monkeypatch):
     _state itself instead. Also resets the module-level scored-customers
     cache, which would otherwise leak a DataFrame between tests."""
     monkeypatch.setattr(api_module, "load_models", lambda: None)
+    # The startup handler also kicks off a background thread that scores the
+    # whole population to warm _scored_cache. Left alone it hits the real
+    # warehouse from every TestClient context, races the fake data these
+    # tests set up, and takes the suite from seconds to minutes. Patching
+    # the target works where patching the handler does not: FastAPI captured
+    # start_cache_warm at decoration time, but it resolves
+    # _warm_scored_cache from module globals when it runs.
+    monkeypatch.setattr(api_module, "_warm_scored_cache", lambda: None)
     api_module._scored_cache.update(data=None, expires_at=0.0, version=None)
     yield
     api_module._scored_cache.update(data=None, expires_at=0.0, version=None)
@@ -88,6 +101,43 @@ def test_overview_stats_combines_the_expected_sources(monkeypatch, fake_churn_st
     assert body["revenue_at_risk"] == pytest.approx(140.0)  # 80 + 60
     assert body["model_auc"] == 0.65
     assert body["top_feature_importances"][0]["feature"] == "contract"  # sorted descending
+
+
+def test_cache_warm_populates_the_scored_cache(monkeypatch, fake_churn_state):
+    """The warm exists so the first visitor doesn't pay a ~35-110s
+    full-population scoring pass (which also saturates the single uvicorn
+    worker while it runs)."""
+    monkeypatch.setattr(dashboard_queries, "score_all_customers", lambda *a, **kw: _scored_df())
+    api_module._scored_cache.update(data=None, expires_at=0.0, version=None)
+
+    _REAL_WARM_SCORED_CACHE()
+
+    assert api_module._scored_cache["data"] is not None
+    assert api_module._scored_cache["version"] == "TESTV1"
+
+
+def test_cache_warm_is_a_no_op_without_a_model(monkeypatch):
+    def _must_not_run(*a, **kw):
+        raise AssertionError("scoring attempted with no churn model loaded")
+
+    monkeypatch.setattr(dashboard_queries, "score_all_customers", _must_not_run)
+    monkeypatch.setitem(api_module._state, "churn", None)
+
+    _REAL_WARM_SCORED_CACHE()  # must not raise
+
+
+def test_cache_warm_failure_never_propagates(monkeypatch, fake_churn_state):
+    """It is an optimisation - if it fails the request path just pays the
+    cost itself, exactly as before. A raising warm thread must not be able
+    to take the API down with it."""
+    def _boom(*a, **kw):
+        raise RuntimeError("warehouse unreachable")
+
+    monkeypatch.setattr(dashboard_queries, "score_all_customers", _boom)
+
+    _REAL_WARM_SCORED_CACHE()  # must not raise
+
+    assert api_module._scored_cache["data"] is None
 
 
 def test_overview_stats_503s_when_churn_model_not_loaded(monkeypatch):
