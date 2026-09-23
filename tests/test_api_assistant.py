@@ -6,10 +6,24 @@ routing/evidence logic (see tests/test_ai_graph.py for that).
 
 from __future__ import annotations
 
+import pytest
 from fastapi.testclient import TestClient
 
 from src.ai.schemas import AssistantResponse
 from src.model import api as api_module
+
+
+@pytest.fixture(autouse=True)
+def _no_real_startup_work(monkeypatch):
+    """Entering a TestClient context fires the real startup handlers, which
+    load model artifacts off disk and kick off a background thread that
+    scores the entire 1M-row population to warm a cache. Neither belongs in
+    a test that only pins the /assistant/query HTTP contract - together
+    they hit the live warehouse and took this suite from seconds to
+    minutes. Patching the thread's target works where patching the handler
+    does not, since FastAPI captured the handler at decoration time."""
+    monkeypatch.setattr(api_module, "load_models", lambda: None)
+    monkeypatch.setattr(api_module, "_warm_scored_cache", lambda: None)
 
 
 def test_assistant_query_returns_the_graph_result(monkeypatch):
