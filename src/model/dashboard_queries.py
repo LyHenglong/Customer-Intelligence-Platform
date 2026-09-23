@@ -11,6 +11,7 @@ one is expensive).
 from __future__ import annotations
 
 import json
+import logging
 import os
 from pathlib import Path
 
@@ -20,6 +21,8 @@ import pandas as pd
 from src.model.train_churn import ALL_FEATURES as CHURN_FEATURES
 from src.model.train_churn import CATEGORICAL_FEATURES as CHURN_CATEGORICAL
 from src.warehouse import get_pg_conn, stream_query
+
+log = logging.getLogger("model.dashboard_queries")
 
 MODELS_DIR = Path(__file__).resolve().parents[2] / "models_store"
 RETRAIN_EVERY_N_BATCHES = int(os.environ.get("RETRAIN_EVERY_N_BATCHES", "3"))
@@ -206,6 +209,38 @@ def load_all_churn_metadata() -> list[dict]:
     return records
 
 
+def _raw_importances(clf):
+    """Gain, not split counts.
+
+    LightGBM's `feature_importances_` defaults to importance_type="split" -
+    how many times a feature was chosen for a split, which is badly biased
+    toward high-cardinality continuous columns simply because they offer
+    more candidate split points. On this dataset that put `credit_score`
+    top (univariate AUC 0.51 - indistinguishable from noise) while
+    `contract`, which separates churn 4.95x, did not even make the top six.
+    The dashboard and the AI assistant were both telling people to act on
+    the wrong lever.
+
+    Gain measures each feature's actual contribution to loss reduction and
+    ranks `contract` first at ~29%, matching the univariate evidence in
+    report/findings.md section 2b.
+
+    Read from the fitted booster rather than set at training time on
+    purpose: this corrects every artifact already in models_store without
+    retraining anything, since it is a reporting bug, not a model bug.
+
+    Falls back to `feature_importances_` for non-LightGBM estimators -
+    scikit-learn's tree ensembles already report mean impurity decrease,
+    which is a gain measure, so only LightGBM needs the special case."""
+    booster = getattr(clf, "booster_", None)
+    if booster is not None:
+        try:
+            return booster.feature_importance(importance_type="gain")
+        except Exception:
+            log.warning("gain importances unavailable, falling back to the estimator's default")
+    return clf.feature_importances_
+
+
 def column_importances(pipeline) -> dict:
     """Maps the preprocessor's expanded output names (e.g.
     'num__num_complaints', 'cat__contract_two_year') back to real
@@ -215,7 +250,7 @@ def column_importances(pipeline) -> dict:
         preproc = pipeline.named_steps["preprocess"]
         clf = pipeline.named_steps["model"]
         names = preproc.get_feature_names_out()
-        raw_importances = clf.feature_importances_
+        raw_importances = _raw_importances(clf)
     except (KeyError, AttributeError):
         return {}
 
