@@ -7,6 +7,7 @@ import type { AtRiskCustomer, AtRiskListResponse, OutreachDraftResponse } from "
 import ThresholdSlider from "@/components/ThresholdSlider";
 import PaginationControls from "@/components/PaginationControls";
 import ShapFactorList from "@/components/ShapFactorList";
+import PageHeader from "@/components/PageHeader";
 import LoadingState from "@/components/LoadingState";
 import ErrorState from "@/components/ErrorState";
 
@@ -67,24 +68,26 @@ export default function AtRiskPage() {
   if (error) return <ErrorState message={error} />;
 
   return (
-    <div className="space-y-4">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <h1 className="text-lg font-semibold" style={{ color: "var(--text-primary)" }}>
-          At-Risk Customers
-        </h1>
-        <div className="flex items-center gap-3">
-          <ThresholdSlider value={threshold ?? 0.1} onChange={(v) => { setThreshold(v); setOffset(0); }} />
-          <button
-            type="button"
-            onClick={exportCsv}
-            disabled={!data || data.customers.length === 0}
-            className="rounded-md border px-3 py-1.5 text-sm disabled:opacity-40"
-            style={{ borderColor: "var(--border)", color: "var(--text-secondary)" }}
-          >
-            Export CSV
-          </button>
-        </div>
-      </div>
+    <div className="space-y-5">
+      <PageHeader
+        eyebrow="Retention Command Center"
+        title="At-risk customers"
+        description="Ranked by churn probability, with the factors driving each one and a next-best action."
+        action={
+          <div className="flex flex-wrap items-center gap-3">
+            <ThresholdSlider value={threshold ?? 0.1} onChange={(v) => { setThreshold(v); setOffset(0); }} />
+            <button
+              type="button"
+              onClick={exportCsv}
+              disabled={!data || data.customers.length === 0}
+              className="rounded-lg px-3.5 py-2 text-[12.5px] font-semibold text-white transition-opacity disabled:opacity-40"
+              style={{ background: "var(--brand)" }}
+            >
+              Export CSV
+            </button>
+          </div>
+        }
+      />
 
       {loading && !data ? (
         <LoadingState label="Scoring the full customer population - this can take a moment on first load..." />

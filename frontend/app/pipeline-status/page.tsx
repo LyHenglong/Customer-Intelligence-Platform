@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { getPipelineStatus, ApiError } from "@/lib/api-client";
 import type { PipelineStatusResponse } from "@/lib/types";
 import KpiCard from "@/components/KpiCard";
+import PageHeader from "@/components/PageHeader";
 import LoadingState from "@/components/LoadingState";
 import ErrorState from "@/components/ErrorState";
 
@@ -44,9 +45,11 @@ export default function PipelineStatusPage() {
 
   return (
     <div className="space-y-6">
-      <h1 className="text-lg font-semibold" style={{ color: "var(--text-primary)" }}>
-        Pipeline Status
-      </h1>
+      <PageHeader
+        eyebrow="Retention Command Center"
+        title="Pipeline status"
+        description="Batch ingestion, feature drift, and where the next conditional retrain sits."
+      />
 
       <div>
         <h2 className="mb-2 text-sm font-semibold" style={{ color: "var(--text-primary)" }}>

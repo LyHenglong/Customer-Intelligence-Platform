@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { postAssistantQuery, ApiError } from "@/lib/api-client";
 import type { AssistantResponse } from "@/lib/types";
+import PageHeader from "@/components/PageHeader";
 import LoadingState from "@/components/LoadingState";
 import ErrorState from "@/components/ErrorState";
 
@@ -31,13 +32,11 @@ export default function AssistantPage() {
 
   return (
     <div className="space-y-4">
-      <h1 className="text-lg font-semibold" style={{ color: "var(--text-primary)" }}>
-        AI Decision Assistant
-      </h1>
-      <p className="text-sm" style={{ color: "var(--text-secondary)" }}>
-        Evidence-grounded answers over this platform&apos;s own data, models, and business documentation - not a
-        general-purpose chatbot. Every number traces back to a tool result shown below the answer.
-      </p>
+      <PageHeader
+        eyebrow="Retention Command Center"
+        title="AI Decision Assistant"
+        description="Evidence-grounded answers over this platform's own data, models and documentation - not a general-purpose chatbot. Every number traces back to a tool result shown below the answer."
+      />
 
       <form
         onSubmit={(e) => {
@@ -51,29 +50,36 @@ export default function AssistantPage() {
           value={query}
           onChange={(e) => setQuery(e.target.value)}
           placeholder={EXAMPLE_QUESTIONS[0]}
-          className="flex-1 rounded-md border px-3 py-2 text-sm"
+          className="flex-1 rounded-lg border px-3.5 py-2.5 text-[13.5px] outline-none transition-colors focus:border-[color:var(--brand)]"
           style={{ borderColor: "var(--border)", background: "var(--surface-card)", color: "var(--text-primary)" }}
         />
         <button
           type="submit"
           disabled={loading || !query.trim()}
-          className="rounded-md px-4 py-2 text-sm font-medium text-white disabled:opacity-40"
-          style={{ background: "var(--series-1)" }}
+          className="rounded-lg px-5 py-2.5 text-[13px] font-semibold text-white transition-opacity disabled:opacity-40"
+          style={{ background: "var(--brand)" }}
         >
-          Analyze
+          {loading ? "Analyzing..." : "Analyze"}
         </button>
       </form>
-      <p className="text-xs" style={{ color: "var(--text-muted)" }}>
-        Try:{" "}
-        {EXAMPLE_QUESTIONS.map((q, i) => (
-          <span key={q}>
-            <button type="button" onClick={() => { setQuery(q); ask(q); }} className="underline" style={{ color: "var(--series-1)" }}>
-              &quot;{q}&quot;
-            </button>
-            {i < EXAMPLE_QUESTIONS.length - 1 && " · "}
-          </span>
+
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="text-[11.5px]" style={{ color: "var(--text-muted)" }}>
+          Try
+        </span>
+        {EXAMPLE_QUESTIONS.map((q) => (
+          <button
+            key={q}
+            type="button"
+            onClick={() => { setQuery(q); ask(q); }}
+            disabled={loading}
+            className="rounded-full border px-3 py-1.5 text-[11.5px] font-medium transition-colors disabled:opacity-40"
+            style={{ borderColor: "var(--border)", background: "var(--surface-card)", color: "var(--text-secondary)" }}
+          >
+            {q}
+          </button>
         ))}
-      </p>
+      </div>
 
       {loading && <LoadingState label="Routing, gathering evidence, and generating an answer..." />}
       {error && <ErrorState message={error} />}
