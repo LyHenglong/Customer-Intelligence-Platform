@@ -222,10 +222,26 @@ def build_pipeline() -> Pipeline:
     # data size. class_weight="balanced" beat SMOTE oversampling in that
     # same experiment (statistically indistinguishable AUC, but SMOTE needs
     # careful threshold recalibration that class_weight doesn't).
+    # Hyperparameters from notebooks/churn_hyperparameter_sweep.py, not
+    # defaults: 9 configs scored by 4-fold CV on identical folds (200K
+    # rows), adopted only because the winner cleared the baseline by more
+    # than one baseline fold-to-fold std - a rule fixed before the numbers
+    # were seen, since this dataset's run-to-run variance is large enough
+    # to manufacture convincing "wins".
+    #
+    # CV AUC 0.6778 +/- 0.0026 against the previous 0.6651 +/- 0.0014
+    # (+0.0127, ~9x the baseline std); 0.6816 on the held-out test set,
+    # which the sweep touched exactly once.
+    #
+    # The direction is the informative part: shallower is better here.
+    # depth 8 barely moved (+0.0034) and unlimited depth at 63 leaves
+    # actively hurt (-0.0118), so the old depth-6/300-round config was
+    # spending capacity memorizing noise in a weak-signal target. More
+    # rounds at a lower learning rate pay for the lost depth.
     clf = LGBMClassifier(
-        n_estimators=300,
-        max_depth=6,
-        learning_rate=0.1,
+        n_estimators=600,
+        max_depth=4,
+        learning_rate=0.05,
         class_weight="balanced",
         random_state=42,
         n_jobs=-1,
