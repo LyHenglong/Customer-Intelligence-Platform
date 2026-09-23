@@ -52,6 +52,22 @@ groq==1.7.0
 # local command - python -m src.ai.rag.ingest) isn't part of that
 # trimmed environment's runtime path either.
 sentence-transformers==3.3.1
+# transformers and torch are pinned even though sentence-transformers
+# pulls them in transitively. Leaving them to the resolver meant every
+# image rebuild picked up whatever was newest, and a rebuild landed
+# transformers 4.57 against this (Nov-2024) sentence-transformers: its
+# CrossEncoder calls .to() on a model whose weights newer transformers
+# leaves on the meta device under memory pressure, which fails at predict
+# time with "Cannot copy out of meta tensor". Same class of problem as the
+# Groq model IDs documented in the README - an unpinned third-party thing
+# moving underneath a pinned one. These two versions are contemporaneous
+# with sentence-transformers 3.3.1.
+#
+# torch is deliberately NOT pinned here: docker/Dockerfile.api installs it
+# separately from PyTorch's CPU-only index, and a pin in this file would
+# resolve against PyPI instead and drag in the multi-GB CUDA build. Its
+# version is pinned at that install line instead.
+transformers==4.46.3
 # BM25 sparse retrieval, fused with vector search in
 # src/ai/rag/hybrid_search.py. Pure Python, no heavy transitive deps -
 # unlike sentence-transformers, safe to add to the trimmed environments

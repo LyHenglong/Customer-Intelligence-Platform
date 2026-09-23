@@ -158,6 +158,28 @@ def load_models() -> None:
         log.warning("No recommender artifact found in %s", MODELS_DIR)
 
 
+def _warm_rag_models() -> None:
+    """Materialises the RAG models while memory is still plentiful.
+
+    Ordering matters: _warm_scored_cache below holds ~2.3GB of scored
+    customers, which leaves a 3GB container almost no headroom. A
+    cross-encoder that first loads under that pressure can come back with
+    its weights stranded on the meta device - see
+    src/ai/rag/reranker.py - so it is loaded first, before the scoring
+    pass claims the memory.
+
+    Best-effort like the scoring warm: RAG degrades to no retrieval
+    evidence rather than taking the API down."""
+    try:
+        from src.ai.rag.reranker import _get_reranker
+
+        t0 = time.monotonic()
+        _get_reranker()
+        log.info("RAG reranker ready in %.1fs", time.monotonic() - t0)
+    except Exception:
+        log.exception("RAG reranker warm failed; retrieval will retry per-request")
+
+
 def _warm_scored_cache() -> None:
     """Pays the full-population scoring cost at startup instead of making
     the first visitor wait for it.
@@ -189,9 +211,14 @@ def _warm_scored_cache() -> None:
         log.exception("scored-cache warm failed; first request will pay the scoring cost")
 
 
+def _warm_all() -> None:
+    _warm_rag_models()
+    _warm_scored_cache()
+
+
 @app.on_event("startup")
 def start_cache_warm() -> None:
-    threading.Thread(target=_warm_scored_cache, name="scored-cache-warm", daemon=True).start()
+    threading.Thread(target=_warm_all, name="startup-warm", daemon=True).start()
 
 
 def _get_scored_customers() -> pd.DataFrame:

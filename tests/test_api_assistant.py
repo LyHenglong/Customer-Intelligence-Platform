@@ -23,7 +23,7 @@ def _no_real_startup_work(monkeypatch):
     minutes. Patching the thread's target works where patching the handler
     does not, since FastAPI captured the handler at decoration time."""
     monkeypatch.setattr(api_module, "load_models", lambda: None)
-    monkeypatch.setattr(api_module, "_warm_scored_cache", lambda: None)
+    monkeypatch.setattr(api_module, "_warm_all", lambda: None)
 
 
 def test_assistant_query_returns_the_graph_result(monkeypatch):
