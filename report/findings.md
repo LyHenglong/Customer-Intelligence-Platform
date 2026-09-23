@@ -215,6 +215,22 @@ contributors:
 These are all sensible, business-plausible churn drivers — no sign the
 model is picking up on noise.
 
+**One implementation note, because the UI disagreed with this list for
+months.** The ranking above is *gain* — each feature's contribution to
+loss reduction. `src/model/dashboard_queries.py`'s `column_importances()`
+was instead reading LightGBM's `feature_importances_`, which defaults to
+*split counts*: how often a feature was chosen to split on. That measure
+is badly biased toward high-cardinality continuous columns, which offer
+more candidate split points regardless of whether the splits help. The
+dashboard and the AI assistant therefore showed `credit_score` as the top
+churn driver — a feature whose univariate AUC is 0.51, i.e. noise (section
+2b) — while `contract` did not appear in their top six at all. Anyone
+acting on that would have optimised the wrong lever entirely. The reading
+is now gain, taken from the fitted booster so every artifact already in
+`models_store` is corrected without retraining, and the UI now matches
+this section: contract 21.6%, customer satisfaction 10.8%, service calls
+5.9%, credit score 4.4%.
+
 ## 3b. Statistical validation — is the risk-factor list actually real?
 
 A feature-importance ranking can look convincing without being statistically

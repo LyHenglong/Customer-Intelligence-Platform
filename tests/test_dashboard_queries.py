@@ -134,6 +134,71 @@ def test_column_importances_maps_expanded_names_back_to_columns():
     assert result["contract"] == pytest.approx(0.5)  # both cat__contract_* buckets summed
 
 
+def test_column_importances_prefers_gain_over_lightgbms_split_counts():
+    """Regression: LightGBM's feature_importances_ defaults to split counts,
+    which are biased toward high-cardinality continuous columns. That put
+    credit_score (univariate AUC 0.51 - noise) top of the dashboard and the
+    AI assistant, while contract (4.95x churn separation) fell outside the
+    top six. Gain ranks them correctly."""
+    class _FakeBooster:
+        def feature_importance(self, importance_type):
+            assert importance_type == "gain"
+            return [10.0, 900.0]
+
+    class _FakePreprocessor:
+        def get_feature_names_out(self):
+            return ["num__credit_score", "cat__contract_two_year"]
+
+    class _FakeModel:
+        booster_ = _FakeBooster()
+        # What the old code read: split counts telling the opposite story.
+        feature_importances_ = [900.0, 10.0]
+
+    class _FakePipeline:
+        named_steps = {"preprocess": _FakePreprocessor(), "model": _FakeModel()}
+
+    result = dashboard_queries.column_importances(_FakePipeline())
+
+    assert result["contract"] > result["credit_score"]
+    assert result["contract"] == pytest.approx(900.0)
+
+
+def test_column_importances_falls_back_when_there_is_no_booster():
+    """Non-LightGBM estimators (this project shipped RandomForest first)
+    expose mean impurity decrease via feature_importances_, which is already
+    a gain measure - no booster to read."""
+    class _FakePreprocessor:
+        def get_feature_names_out(self):
+            return ["num__tenure"]
+
+    class _FakeModel:
+        feature_importances_ = [0.75]
+
+    class _FakePipeline:
+        named_steps = {"preprocess": _FakePreprocessor(), "model": _FakeModel()}
+
+    assert dashboard_queries.column_importances(_FakePipeline())["tenure"] == pytest.approx(0.75)
+
+
+def test_column_importances_survives_a_booster_that_raises():
+    class _AngryBooster:
+        def feature_importance(self, importance_type):
+            raise RuntimeError("booster not available")
+
+    class _FakePreprocessor:
+        def get_feature_names_out(self):
+            return ["num__tenure"]
+
+    class _FakeModel:
+        booster_ = _AngryBooster()
+        feature_importances_ = [0.42]
+
+    class _FakePipeline:
+        named_steps = {"preprocess": _FakePreprocessor(), "model": _FakeModel()}
+
+    assert dashboard_queries.column_importances(_FakePipeline())["tenure"] == pytest.approx(0.42)
+
+
 def test_column_importances_returns_empty_dict_on_unexpected_pipeline_shape():
     class _NotAPipeline:
         named_steps = {}
