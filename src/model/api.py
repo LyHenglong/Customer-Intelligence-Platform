@@ -526,8 +526,21 @@ def overview_stats(threshold: Optional[float] = None):
     scored = _get_scored_customers()
     at_risk = scored[scored["churn_probability"] >= effective_threshold]
 
+    # The metadata entry for the model actually loaded, not simply the
+    # newest file in models_store. Those diverge whenever the registry
+    # resolves something other than latest-on-disk - most obviously when
+    # MLflow's "champion" alias points at an older artifact, which is
+    # exactly what happens if a retrain saves successfully but fails to
+    # register (see src/model/registry.py). Reporting the newest file's
+    # AUC beside _state's version produced a self-contradictory response:
+    # one model's version label next to another model's score. None is
+    # returned rather than a fallback, because a wrong AUC is worse than
+    # an absent one.
     metadata_history = dashboard_queries.load_all_churn_metadata()
-    model_auc = metadata_history[-1].get("roc_auc") if metadata_history else None
+    serving_metadata = next(
+        (m for m in metadata_history if m.get("version") == _state["churn_version"]), None
+    )
+    model_auc = serving_metadata.get("roc_auc") if serving_metadata else None
 
     pipeline = _state["churn"]["pipeline"]
     explain_pipeline = _state["churn"].get("base_pipeline", pipeline)
@@ -770,8 +783,18 @@ def model_history():
     models_store/*.json shape has drifted across versions (e.g. not every
     file has every field), and over-constraining risks a 500 on an old
     version's file that simply predates a newer field. Mirrors
-    /assistant/trace/{id}'s same "return the raw dict" choice below."""
-    return {"versions": dashboard_queries.load_all_churn_metadata()}
+    /assistant/trace/{id}'s same "return the raw dict" choice below.
+
+    serving_version names which of these is actually loaded. Callers must
+    not assume that is the last entry: the registry can resolve an older
+    artifact than the newest on disk (an MLflow "champion" alias pinned to
+    a previous version, a retrain that saved but failed to register), and
+    labelling the newest file "current production model" then misreports
+    the live threshold, precision and confusion matrix."""
+    return {
+        "versions": dashboard_queries.load_all_churn_metadata(),
+        "serving_version": _state["churn_version"],
+    }
 
 
 @app.get("/pipeline-status")
