@@ -4,6 +4,7 @@ import { useState } from "react";
 import { postAssistantQuery, ApiError } from "@/lib/api-client";
 import type { AssistantResponse } from "@/lib/types";
 import PageHeader from "@/components/PageHeader";
+import Card from "@/components/Card";
 import LoadingState from "@/components/LoadingState";
 import ErrorState from "@/components/ErrorState";
 
@@ -85,7 +86,7 @@ export default function AssistantPage() {
       {error && <ErrorState message={error} />}
 
       {result && (
-        <div className="space-y-4 rounded-lg border p-4" style={{ borderColor: "var(--border)", background: "var(--surface-card)" }}>
+        <Card bodyClassName="space-y-4">
           <p className="font-medium" style={{ color: "var(--text-primary)" }}>{result.answer}</p>
 
           <div className="flex flex-wrap gap-4 text-xs" style={{ color: "var(--text-muted)" }}>
@@ -123,7 +124,7 @@ export default function AssistantPage() {
               </ul>
             </details>
           )}
-        </div>
+        </Card>
       )}
     </div>
   );

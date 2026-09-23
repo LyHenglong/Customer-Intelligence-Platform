@@ -5,6 +5,7 @@ import { getOverviewStats, getSegmentRates, ApiError } from "@/lib/api-client";
 import type { FeatureImportance, SegmentRatesResponse } from "@/lib/types";
 import ChurnBarChart from "@/components/ChurnBarChart";
 import PageHeader from "@/components/PageHeader";
+import Card from "@/components/Card";
 import LoadingState from "@/components/LoadingState";
 import ErrorState from "@/components/ErrorState";
 
@@ -63,10 +64,7 @@ export default function SegmentsPage() {
           {SEGMENT_COLUMNS.map((s) => {
             const data = segments[s.column];
             return (
-              <div key={s.column} className="rounded-lg border p-4" style={{ borderColor: "var(--border)", background: "var(--surface-card)" }}>
-                <h3 className="mb-2 text-xs font-medium" style={{ color: "var(--text-secondary)" }}>
-                  {s.label}
-                </h3>
+              <Card key={s.column} title={s.label}>
                 {data && (
                   <ChurnBarChart
                     data={data.buckets.map((b) => ({ label: b.key, value: b.churn_rate }))}
@@ -74,23 +72,20 @@ export default function SegmentsPage() {
                     height={220}
                   />
                 )}
-              </div>
+              </Card>
             );
           })}
         </div>
       </div>
 
-      <div className="rounded-lg border p-4" style={{ borderColor: "var(--border)", background: "var(--surface-card)" }}>
-        <h2 className="mb-2 text-sm font-semibold" style={{ color: "var(--text-primary)" }}>
-          What the model weighs most
-        </h2>
+      <Card title="What the model weighs most">
         <ChurnBarChart
           data={importances.map((f) => ({ label: f.feature.replaceAll("_", " "), value: f.importance }))}
           valueFormatter={(v) => v.toFixed(0)}
           layout="horizontal"
           height={420}
         />
-      </div>
+      </Card>
     </div>
   );
 }

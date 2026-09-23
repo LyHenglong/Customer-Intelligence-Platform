@@ -80,7 +80,7 @@ export default function CustomersPage() {
         <LoadingState />
       ) : data ? (
         <>
-          <div className="overflow-x-auto rounded-lg border" style={{ borderColor: "var(--border)" }}>
+          <div className="overflow-x-auto rounded-xl border" style={{ borderColor: "var(--border)", background: "var(--surface-card)", boxShadow: "var(--shadow-card)" }}>
             <table className="w-full text-sm">
               <thead>
                 <tr className="text-left" style={{ color: "var(--text-muted)", background: "var(--surface-card)" }}>
