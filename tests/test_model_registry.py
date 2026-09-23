@@ -52,6 +52,25 @@ def test_resolve_returns_none_when_no_artifacts_exist(models_dir, monkeypatch):
     assert result is None
 
 
+def test_telco_benchmark_artifacts_can_never_hijack_the_production_model(models_dir, monkeypatch):
+    """src/model/train_churn_telco.py trains on 7,043 real Telco rows with a
+    completely different schema, purely as a signal benchmark. Because the
+    production glob takes the newest match, a name like
+    "churn_model_telco_*.joblib" would silently be served against
+    marts.customer_360's 1,000,000 customers the moment the benchmark ran.
+    The "telco_churn_" prefix is what prevents that, so it is pinned here
+    rather than left to a future rename."""
+    monkeypatch.delenv("MLFLOW_TRACKING_URI", raising=False)
+    production = _touch(models_dir / "churn_model_20260101T000000Z.joblib")
+    # Deliberately newer - if the prefix stopped protecting us, recency
+    # would hand this one the production slot.
+    _touch(models_dir / "telco_churn_20260601T000000Z.joblib")
+
+    result = registry.resolve_model_path("churn_model", "churn_model_*.joblib", models_dir=models_dir)
+
+    assert result == production
+
+
 # --------------------------------------------------------------------------
 # MLflow configured
 # --------------------------------------------------------------------------
