@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { getOverviewStats, getSegmentRates, ApiError } from "@/lib/api-client";
 import type { FeatureImportance, SegmentRatesResponse } from "@/lib/types";
 import ChurnBarChart from "@/components/ChurnBarChart";
+import PageHeader from "@/components/PageHeader";
 import LoadingState from "@/components/LoadingState";
 import ErrorState from "@/components/ErrorState";
 
@@ -48,9 +49,11 @@ export default function SegmentsPage() {
 
   return (
     <div className="space-y-6">
-      <h1 className="text-lg font-semibold" style={{ color: "var(--text-primary)" }}>
-        Segments
-      </h1>
+      <PageHeader
+        eyebrow="Retention Command Center"
+        title="Segments"
+        description="Churn rate broken out across demographic and account dimensions."
+      />
 
       <div>
         <h2 className="mb-2 text-sm font-semibold" style={{ color: "var(--text-primary)" }}>

@@ -5,6 +5,7 @@ import Link from "next/link";
 import { searchCustomers, ApiError } from "@/lib/api-client";
 import type { CustomerSearchFilters, CustomerSearchResult } from "@/lib/types";
 import PaginationControls from "@/components/PaginationControls";
+import PageHeader from "@/components/PageHeader";
 import LoadingState from "@/components/LoadingState";
 import ErrorState from "@/components/ErrorState";
 
@@ -37,9 +38,11 @@ export default function CustomersPage() {
 
   return (
     <div className="space-y-4">
-      <h1 className="text-lg font-semibold" style={{ color: "var(--text-primary)" }}>
-        Customers
-      </h1>
+      <PageHeader
+        eyebrow="Retention Command Center"
+        title="Customers"
+        description="Search and filter the full customer base, then open anyone for a complete risk profile."
+      />
 
       <div className="flex flex-wrap gap-3">
         <select

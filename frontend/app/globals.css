@@ -1,33 +1,60 @@
 @import "tailwindcss";
 
-/* Design tokens - the dataviz skill's validated default palette
-   (references/palette.md). Light/dark declared under both the OS media
-   query and a future data-theme toggle scope, per that file's guidance -
-   only the media query is wired up today (no theme toggle UI yet). */
+/* Design tokens.
+   Chrome (surfaces, brand green, sidebar) follows the CRM dashboard
+   reference; the categorical series are NOT picked by eye - they come from
+   the dataviz skill's validator (scripts/validate_palette.js), which is
+   what "green first" cost us: several obvious orderings failed.
+
+   Light  #1baf7a,#2a78d6,#eda100,#4a3aa7,#e34948 -> ALL CHECKS PASS
+   Dark   #199e70,#3987e5,#c98500,#9085e9,#e66767 -> ALL CHECKS PASS
+
+   Five slots, not eight, on purpose. Red sits 13.2 ΔE from magenta for
+   normal vision in every ordering tried (the floor is 15), and orange sits
+   3.2 ΔE from dark green under protanopia, so an eight-slot set could not
+   be made safe - and nothing in this app plots more than four categories.
+   A sixth category folds into "Other" rather than inventing a hue.
+
+   Light mode warns that --series-1 (2.74:1) and --series-3 (2.11:1) fall
+   under 3:1 against the card. That is allowed only with secondary
+   encoding, which every chart here has: bars carry value labels and the
+   donut/legend pairs each swatch with text. Do not drop those labels. */
 :root {
   color-scheme: light;
-  --surface-page: #f9f9f7;
-  --surface-card: #fcfcfb;
-  --text-primary: #0b0b0b;
-  --text-secondary: #52514e;
-  --text-muted: #898781;
-  --gridline: #e1e0d9;
-  --axis: #c3c2b7;
-  --border: rgba(11, 11, 11, 0.1);
 
-  --series-1: #2a78d6; /* blue */
-  --series-2: #eb6834; /* orange */
-  --series-3: #1baf7a; /* aqua */
-  --series-4: #eda100; /* yellow */
-  --series-5: #e87ba4; /* magenta */
-  --series-6: #008300; /* green */
-  --series-7: #4a3aa7; /* violet */
-  --series-8: #e34948; /* red */
+  /* Surfaces - page sits slightly cool//lavender so white cards lift off it. */
+  --surface-page: #f6f8fb;
+  --surface-card: #ffffff;
+  --surface-sunken: #f1f4f9;
+
+  --text-primary: #0f172a;
+  --text-secondary: #56657e;
+  --text-muted: #94a3b8;
+
+  --gridline: #eef1f6;
+  --axis: #d6dde8;
+  --border: #e9edf3;
+
+  /* Brand - green accent from the reference. --brand-strong is the text/
+     icon-safe step (4.5:1+ on white); --brand is for fills, which carry
+     labels rather than text on top. */
+  --brand: #16a34a;
+  --brand-strong: #15803d;
+  --brand-tint: #e7f7ee;
+  --brand-tint-strong: #d3f0e0;
+
+  --series-1: #1baf7a;
+  --series-2: #2a78d6;
+  --series-3: #eda100;
+  --series-4: #4a3aa7;
+  --series-5: #e34948;
 
   --status-good: #0ca30c;
   --status-warning: #fab219;
   --status-serious: #ec835a;
   --status-critical: #d03b3b;
+
+  --shadow-card: 0 1px 2px rgba(15, 23, 42, 0.04), 0 1px 3px rgba(15, 23, 42, 0.03);
 
   --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
@@ -36,28 +63,36 @@
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) {
     color-scheme: dark;
-    --surface-page: #0d0d0d;
-    --surface-card: #1a1a19;
-    --text-primary: #ffffff;
-    --text-secondary: #c3c2b7;
-    --text-muted: #898781;
-    --gridline: #2c2c2a;
-    --axis: #383835;
-    --border: rgba(255, 255, 255, 0.1);
 
-    --series-1: #3987e5;
-    --series-2: #d95926;
-    --series-3: #199e70;
-    --series-4: #c98500;
-    --series-5: #d55181;
-    --series-6: #008300;
-    --series-7: #9085e9;
-    --series-8: #e66767;
+    --surface-page: #0d1117;
+    --surface-card: #161b22;
+    --surface-sunken: #1c232c;
+
+    --text-primary: #f0f4f9;
+    --text-secondary: #9fb0c6;
+    --text-muted: #6b7f96;
+
+    --gridline: #242c36;
+    --axis: #333d49;
+    --border: #232b35;
+
+    --brand: #2ebd6b;
+    --brand-strong: #4ed188;
+    --brand-tint: #14281d;
+    --brand-tint-strong: #1a3527;
+
+    --series-1: #199e70;
+    --series-2: #3987e5;
+    --series-3: #c98500;
+    --series-4: #9085e9;
+    --series-5: #e66767;
 
     --status-good: #0ca30c;
     --status-warning: #fab219;
     --status-serious: #ec835a;
     --status-critical: #d03b3b;
+
+    --shadow-card: 0 1px 2px rgba(0, 0, 0, 0.4);
   }
 }
 
@@ -71,4 +106,11 @@
 body {
   background: var(--surface-page);
   color: var(--text-primary);
+}
+
+/* Recharts draws its own focus outlines on every wrapper; suppress only
+   those, never real interactive elements. */
+.recharts-wrapper:focus,
+.recharts-surface:focus {
+  outline: none;
 }

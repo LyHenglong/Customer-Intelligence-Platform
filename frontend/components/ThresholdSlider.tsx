@@ -12,8 +12,17 @@ export default function ThresholdSlider({
   step?: number;
 }) {
   return (
-    <label className="flex items-center gap-3 text-sm">
-      <span style={{ color: "var(--text-secondary)" }}>Churn probability threshold</span>
+    <label
+      className="flex items-center gap-3 rounded-lg border px-3 py-2 text-[12.5px]"
+      style={{
+        borderColor: "var(--border)",
+        background: "var(--surface-card)",
+        boxShadow: "var(--shadow-card)",
+      }}
+    >
+      <span className="whitespace-nowrap font-medium" style={{ color: "var(--text-secondary)" }}>
+        Churn probability threshold
+      </span>
       <input
         type="range"
         min={min}
@@ -21,9 +30,12 @@ export default function ThresholdSlider({
         step={step}
         value={value}
         onChange={(e) => onChange(Number(e.target.value))}
-        className="w-40 accent-[var(--series-1)]"
+        className="w-36 accent-[var(--brand)]"
       />
-      <span className="w-12 tabular-nums font-medium" style={{ color: "var(--text-primary)" }}>
+      <span
+        className="w-11 rounded-md px-1.5 py-0.5 text-center text-[12px] font-semibold tabular-nums"
+        style={{ background: "var(--brand-tint)", color: "var(--brand-strong)" }}
+      >
         {value.toFixed(2)}
       </span>
     </label>

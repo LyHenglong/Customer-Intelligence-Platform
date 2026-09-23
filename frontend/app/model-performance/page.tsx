@@ -5,6 +5,8 @@ import { Line, LineChart, CartesianGrid, Legend, ResponsiveContainer, Tooltip, X
 import { getModelHistory, ApiError } from "@/lib/api-client";
 import type { ModelVersionMetadata } from "@/lib/types";
 import KpiCard from "@/components/KpiCard";
+import PageHeader from "@/components/PageHeader";
+import Card from "@/components/Card";
 import LoadingState from "@/components/LoadingState";
 import ErrorState from "@/components/ErrorState";
 
@@ -97,49 +99,53 @@ export default function ModelPerformancePage() {
   }));
 
   return (
-    <div className="space-y-6">
-      <h1 className="text-lg font-semibold" style={{ color: "var(--text-primary)" }}>
-        Model Performance
-      </h1>
+    <div className="space-y-5">
+      <PageHeader
+        eyebrow="Retention Command Center"
+        title="Model performance"
+        description="How the serving model scores, and how that has moved across retrains."
+        action={
+          <span
+            className="rounded-lg px-3 py-2 text-[12px] font-semibold"
+            style={{ background: "var(--brand-tint)", color: "var(--brand-strong)" }}
+          >
+            Serving {latest.version}
+          </span>
+        }
+      />
 
       <div>
-        <h2 className="mb-2 text-sm font-semibold" style={{ color: "var(--text-primary)" }}>
-          Current production model - {latest.version}
-        </h2>
         {isStale && (
-          <p className="mb-2 text-xs" style={{ color: "var(--status-warning)" }}>
+          <p
+            className="mb-3 rounded-lg px-3 py-2 text-[12px]"
+            style={{ background: "color-mix(in srgb, var(--status-warning) 14%, transparent)", color: "var(--text-secondary)" }}
+          >
             A newer artifact ({history[history.length - 1].version}) exists but is not
             being served - the model registry resolves to the version above. Check the
             MLflow &quot;champion&quot; alias if that is unintended.
           </p>
         )}
         <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
-          <KpiCard label="Precision (churn)" value={latest.precision_churn?.toFixed(3) ?? "-"} />
-          <KpiCard label="Recall (churn)" value={latest.recall_churn?.toFixed(3) ?? "-"} />
-          <KpiCard label="F1 (churn)" value={latest.f1_churn?.toFixed(3) ?? "-"} />
-          <KpiCard label="Decision threshold" value={latest.threshold?.toFixed(3) ?? "-"} />
+          <KpiCard label="Precision (churn)" value={latest.precision_churn?.toFixed(3) ?? "-"} tone="info" />
+          <KpiCard label="Recall (churn)" value={latest.recall_churn?.toFixed(3) ?? "-"} tone="brand" />
+          <KpiCard label="F1 (churn)" value={latest.f1_churn?.toFixed(3) ?? "-"} tone="violet" />
+          <KpiCard label="Decision threshold" value={latest.threshold?.toFixed(3) ?? "-"} tone="warning" />
         </div>
         {latest.threshold_rationale && (
-          <p className="mt-2 text-xs" style={{ color: "var(--text-muted)" }}>
+          <p className="mt-2.5 text-[11.5px] leading-relaxed" style={{ color: "var(--text-muted)" }}>
             {latest.threshold_rationale}
           </p>
         )}
       </div>
 
       {latest.confusion_matrix && (
-        <div className="rounded-lg border p-4" style={{ borderColor: "var(--border)", background: "var(--surface-card)" }}>
-          <h2 className="mb-3 text-sm font-semibold" style={{ color: "var(--text-primary)" }}>
-            Confusion matrix (at threshold)
-          </h2>
+        <Card title="Confusion matrix (at threshold)">
           <ConfusionMatrix matrix={latest.confusion_matrix} />
-        </div>
+        </Card>
       )}
 
       {history.length > 1 && (
-        <div className="rounded-lg border p-4" style={{ borderColor: "var(--border)", background: "var(--surface-card)" }}>
-          <h2 className="mb-2 text-sm font-semibold" style={{ color: "var(--text-primary)" }}>
-            Performance across retrains
-          </h2>
+        <Card title="Performance across retrains">
           <ResponsiveContainer width="100%" height={280}>
             <LineChart data={trend} margin={{ top: 8, right: 12, bottom: 8, left: 8 }}>
               <CartesianGrid strokeDasharray="3 3" stroke="var(--gridline)" />
@@ -151,7 +157,7 @@ export default function ModelPerformancePage() {
               <Line type="monotone" dataKey="f1_churn" name="F1 (churn)" stroke="var(--series-2)" strokeWidth={2} dot={{ r: 3 }} />
             </LineChart>
           </ResponsiveContainer>
-        </div>
+        </Card>
       )}
     </div>
   );
