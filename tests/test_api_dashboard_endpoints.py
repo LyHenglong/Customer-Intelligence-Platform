@@ -47,7 +47,7 @@ def _isolate_api_state(monkeypatch):
     # the target works where patching the handler does not: FastAPI captured
     # start_cache_warm at decoration time, but it resolves
     # _warm_scored_cache from module globals when it runs.
-    monkeypatch.setattr(api_module, "_warm_scored_cache", lambda: None)
+    monkeypatch.setattr(api_module, "_warm_all", lambda: None)
     api_module._scored_cache.update(data=None, expires_at=0.0, version=None)
     yield
     api_module._scored_cache.update(data=None, expires_at=0.0, version=None)

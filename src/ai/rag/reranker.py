@@ -18,9 +18,26 @@ RERANKER_MODEL_NAME = os.environ.get("AI_RERANKER_MODEL", "cross-encoder/ms-marc
 
 @lru_cache(maxsize=1)
 def _get_reranker():
+    """Loads the cross-encoder and proves it can actually score before
+    letting lru_cache keep it.
+
+    CrossEncoder's constructor succeeds even when the weights never
+    materialise - under memory pressure recent transformers versions leave
+    them on the "meta" device, and the failure only surfaces later inside
+    predict(), as "Cannot copy out of meta tensor; no data!". Without the
+    probe below, lru_cache stored that half-built object and every
+    subsequent rerank() reused it, so one unlucky first load disabled RAG
+    retrieval for the entire life of the process - the assistant kept
+    answering, just with the retrieval evidence silently missing.
+
+    Raising instead means nothing is cached (lru_cache does not memoize an
+    exception), so the next call gets a clean attempt once memory frees
+    up."""
     from sentence_transformers import CrossEncoder
 
-    return CrossEncoder(RERANKER_MODEL_NAME)
+    model = CrossEncoder(RERANKER_MODEL_NAME)
+    model.predict([("warm-up query", "warm-up passage")])
+    return model
 
 
 def rerank(query: str, candidates: list[dict], top_k: int = 5) -> list[dict]:

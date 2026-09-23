@@ -26,8 +26,16 @@ RUN apt-get update \
 # failing outright on one delayed chunk. Confirmed via a real build that
 # even 100s/10 retries wasn't always enough - this network's stalls are
 # occasionally longer than that.
+# Pinned, not floating: this line previously installed whatever torch was
+# newest, so two builds of the same commit could ship different runtimes.
+# A rebuild picked up torch 2.14/transformers 4.57 against the pinned
+# sentence-transformers 3.3.1 and broke cross-encoder reranking at predict
+# time ("Cannot copy out of meta tensor"), which silently disabled RAG
+# retrieval while the assistant carried on answering without it. 2.5.1 is
+# contemporaneous with sentence-transformers 3.3.1; keep it in step with
+# the transformers pin in requirements.txt.
 RUN pip install --no-cache-dir --default-timeout=300 --retries 15 \
-    torch --index-url https://download.pytorch.org/whl/cpu
+    torch==2.5.1 --index-url https://download.pytorch.org/whl/cpu
 
 COPY requirements.txt .
 RUN pip install --no-cache-dir --default-timeout=300 --retries 15 -r requirements.txt
