@@ -1,11 +1,28 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { getOverviewStats, getRevenueAtRiskBySegment, getSegmentRates, ApiError } from "@/lib/api-client";
-import type { OverviewStatsResponse, RevenueAtRiskResponse, SegmentRatesResponse } from "@/lib/types";
+import {
+  getOverviewStats,
+  getRevenueAtRiskBySegment,
+  getSegmentRates,
+  getPipelineStatus,
+  getModelHistory,
+  ApiError,
+} from "@/lib/api-client";
+import type {
+  OverviewStatsResponse,
+  RevenueAtRiskResponse,
+  SegmentRatesResponse,
+  PipelineStatusResponse,
+  ModelVersionMetadata,
+} from "@/lib/types";
 import KpiCard from "@/components/KpiCard";
 import Card from "@/components/Card";
 import ChurnBarChart from "@/components/ChurnBarChart";
+import DonutChart from "@/components/DonutChart";
+import TrendAreaChart from "@/components/TrendAreaChart";
+import FunnelChart from "@/components/FunnelChart";
+import FeedList, { type FeedItem } from "@/components/FeedList";
 import ThresholdSlider from "@/components/ThresholdSlider";
 import LoadingState from "@/components/LoadingState";
 import ErrorState from "@/components/ErrorState";
@@ -24,12 +41,6 @@ const ICONS = {
   model: kpiIcon(<><path d="M3 20h18" /><path d="M6 20v-6" /><path d="M11 20V7" /><path d="M16 20v-9" /><path d="M21 20V4" /></>),
 };
 
-const SEGMENT_COLUMNS = [
-  { column: "contract", label: "Churn rate by contract type" },
-  { column: "tenure_bucket", label: "Churn rate by tenure" },
-  { column: "total_active_services", label: "Churn rate by service bundle size" },
-];
-
 function compactCurrency(value: number): string {
   const abs = Math.abs(value);
   if (abs >= 1_000_000_000) return `$${(value / 1_000_000_000).toFixed(1)}B`;
@@ -38,11 +49,16 @@ function compactCurrency(value: number): string {
   return `$${value.toFixed(0)}`;
 }
 
+const compactCount = (value: number) => (value >= 1000 ? `${(value / 1000).toFixed(0)}K` : String(value));
+
 export default function OverviewPage() {
   const [threshold, setThreshold] = useState<number | null>(null);
   const [stats, setStats] = useState<OverviewStatsResponse | null>(null);
-  const [segments, setSegments] = useState<Record<string, SegmentRatesResponse>>({});
+  const [contractRates, setContractRates] = useState<SegmentRatesResponse | null>(null);
+  const [tenureRates, setTenureRates] = useState<SegmentRatesResponse | null>(null);
   const [revenueAtRisk, setRevenueAtRisk] = useState<RevenueAtRiskResponse | null>(null);
+  const [pipeline, setPipeline] = useState<PipelineStatusResponse | null>(null);
+  const [models, setModels] = useState<ModelVersionMetadata[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
 
@@ -54,18 +70,20 @@ export default function OverviewPage() {
     Promise.all([
       getOverviewStats(threshold ?? undefined),
       getRevenueAtRiskBySegment(threshold ?? undefined),
-      ...SEGMENT_COLUMNS.map((s) => getSegmentRates(s.column)),
+      getSegmentRates("contract"),
+      getSegmentRates("tenure_bucket"),
+      getPipelineStatus(),
+      getModelHistory(),
     ])
-      .then(([statsRes, revenueRes, ...segmentResults]) => {
+      .then(([statsRes, revenueRes, contractRes, tenureRes, pipelineRes, modelsRes]) => {
         if (cancelled) return;
         setStats(statsRes);
         setRevenueAtRisk(revenueRes);
+        setContractRates(contractRes);
+        setTenureRates(tenureRes);
+        setPipeline(pipelineRes);
+        setModels(modelsRes.versions);
         setThreshold((prev) => prev ?? statsRes.threshold_used);
-        const bySlug: Record<string, SegmentRatesResponse> = {};
-        SEGMENT_COLUMNS.forEach((s, i) => {
-          bySlug[s.column] = segmentResults[i];
-        });
-        setSegments(bySlug);
       })
       .catch((e: unknown) => {
         if (!cancelled) setError(e instanceof ApiError ? e.message : "Failed to load overview data.");
@@ -84,12 +102,72 @@ export default function OverviewPage() {
   if (loading && !stats) return <LoadingState label="Scoring the full customer population - this can take a moment on first load..." />;
   if (!stats) return null;
 
+  // Cumulative customers in the warehouse after each batch landed - the
+  // real analogue of the reference's acquisition curve.
+  const growth = (pipeline?.ingestion_log ?? []).reduce<{ label: string; value: number }[]>((acc, row, i) => {
+    const previous = i > 0 ? acc[i - 1].value : 0;
+    acc.push({ label: row.batch_file.replace(/^batch_|\.csv$/g, ""), value: previous + row.rows_loaded });
+    return acc;
+  }, []);
+
+  // A survival funnel: how many customers have *reached at least* each
+  // tenure stage, so it decreases monotonically the way a funnel must.
+  //
+  // The obvious version - one band per tenure bucket - is not a funnel at
+  // all. Those are three co-existing populations, not sequential stages,
+  // and plotting them this way produced bands reading 100% -> 186% -> 167%.
+  // A funnel whose stages grow is telling the reader something false about
+  // the data's shape, so the stages are cumulative instead.
+  const bucketCount = (key: string) => tenureRates?.buckets.find((b) => b.key === key)?.n_customers ?? 0;
+  const reached6 = bucketCount("established_6_24mo") + bucketCount("loyal_24mo_plus");
+  const reached24 = bucketCount("loyal_24mo_plus");
+  const funnel = tenureRates
+    ? [
+        { label: "Joined", value: tenureRates.buckets.reduce((sum, b) => sum + b.n_customers, 0) },
+        { label: "Reached 6 months", value: reached6 },
+        { label: "Reached 24 months", value: reached24 },
+      ].filter((s) => s.value > 0)
+    : [];
+
+  const batchFeed: FeedItem[] = [...(pipeline?.ingestion_log ?? [])]
+    .reverse()
+    .slice(0, 5)
+    .map((row) => ({
+      id: row.batch_file,
+      badge: row.batch_file.replace(/^batch_|\.csv$/g, ""),
+      title: `${row.rows_loaded.toLocaleString()} rows loaded`,
+      subtitle: row.batch_file,
+      meta: row.loaded_at.slice(0, 10),
+      status: row.status === "success" ? "good" : "critical",
+    }));
+
+  const modelFeed: FeedItem[] = [...models]
+    .reverse()
+    .slice(0, 5)
+    .map((m) => ({
+      id: m.version,
+      badge: "v",
+      title: m.roc_auc ? `AUC ${m.roc_auc.toFixed(3)}` : "metrics unavailable",
+      subtitle: m.version,
+      meta: m.f1_churn ? `F1 ${m.f1_churn.toFixed(3)}` : undefined,
+      status: "neutral",
+    }));
+
+  const driftFeed: FeedItem[] = (pipeline?.drift ?? []).slice(0, 5).map((d) => ({
+    id: d.feature,
+    badge: "PSI",
+    title: d.feature.replace(/_/g, " "),
+    subtitle: `PSI ${d.psi.toFixed(4)}`,
+    meta: d.severity,
+    status: d.severity === "significant" ? "critical" : d.severity === "moderate" ? "warning" : "good",
+  }));
+
   return (
     <div className="space-y-5">
       <div className="flex flex-wrap items-end justify-between gap-4">
         <div>
           <p className="text-[13px]" style={{ color: "var(--text-secondary)" }}>
-            Retention Command Center
+            Good day,
           </p>
           <h1 className="mt-0.5 text-[26px] font-bold leading-tight tracking-tight" style={{ color: "var(--text-primary)" }}>
             Here&rsquo;s your retention overview
@@ -101,17 +179,10 @@ export default function OverviewPage() {
         <ThresholdSlider value={threshold ?? stats.threshold_used} onChange={setThreshold} />
       </div>
 
+      {/* Row 1 - KPI strip */}
       <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-5">
-        {/* Labels kept to one line each - a wrapping label was pushing its
-            card taller than the rest of the row. */}
         <KpiCard label="Total customers" value={stats.total_customers.toLocaleString()} icon={ICONS.customers} tone="info" sublabel="in the warehouse" />
-        <KpiCard
-          label="Churn rate"
-          value={`${(stats.historical_churn_rate * 100).toFixed(1)}%`}
-          icon={ICONS.churn}
-          tone="warning"
-          sublabel="historical, observed"
-        />
+        <KpiCard label="Churn rate" value={`${(stats.historical_churn_rate * 100).toFixed(1)}%`} icon={ICONS.churn} tone="warning" sublabel="historical, observed" />
         <KpiCard
           label="At-risk now"
           value={stats.at_risk_count.toLocaleString()}
@@ -119,67 +190,86 @@ export default function OverviewPage() {
           tone="danger"
           sublabel={`${((stats.at_risk_count / stats.total_customers) * 100).toFixed(1)}% of all customers`}
         />
-        <KpiCard
-          label="Revenue at risk"
-          value={compactCurrency(stats.revenue_at_risk)}
-          icon={ICONS.revenue}
-          tone="brand"
-          sublabel="per month, recurring"
-        />
-        <KpiCard
-          label="Model AUC"
-          value={stats.model_auc ? stats.model_auc.toFixed(3) : "-"}
-          icon={ICONS.model}
-          tone="violet"
-          sublabel={stats.model_version ?? undefined}
-        />
+        <KpiCard label="Revenue at risk" value={compactCurrency(stats.revenue_at_risk)} icon={ICONS.revenue} tone="brand" sublabel="per month, recurring" />
+        <KpiCard label="Model AUC" value={stats.model_auc ? stats.model_auc.toFixed(3) : "-"} icon={ICONS.model} tone="violet" sublabel={stats.model_version ?? undefined} />
       </div>
 
-      <div>
-        <h2 className="mb-3 text-[13.5px] font-semibold" style={{ color: "var(--text-primary)" }}>
-          Where churn concentrates
-        </h2>
-        <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
-          {SEGMENT_COLUMNS.map((s) => {
-            const data = segments[s.column];
-            return (
-              <Card key={s.column} title={s.label}>
-                {data ? (
-                  <ChurnBarChart
-                    data={data.buckets.map((b) => ({ label: b.key, value: b.churn_rate }))}
-                    valueFormatter={(v) => `${(v * 100).toFixed(0)}%`}
-                    height={200}
-                  />
-                ) : (
-                  <LoadingState />
-                )}
-              </Card>
-            );
-          })}
-        </div>
+      {/* Row 2 - ranked magnitudes beside a composition donut */}
+      <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+        <Card
+          title="Churn rate by contract"
+          action={<span className="text-[11.5px]" style={{ color: "var(--text-muted)" }}>Whole customer base</span>}
+        >
+          {contractRates ? (
+            <ChurnBarChart
+              data={contractRates.buckets.map((b) => ({ label: b.key, value: b.churn_rate }))}
+              valueFormatter={(v) => `${(v * 100).toFixed(0)}%`}
+              layout="horizontal"
+              height={240}
+            />
+          ) : (
+            <LoadingState />
+          )}
+        </Card>
+
+        <Card
+          title="Revenue at risk by contract"
+          action={<span className="text-[11.5px]" style={{ color: "var(--text-muted)" }}>Share of monthly total</span>}
+        >
+          {revenueAtRisk && revenueAtRisk.buckets.length > 0 ? (
+            <DonutChart
+              data={revenueAtRisk.buckets.map((b) => ({ label: b.segment, value: b.revenue_at_risk }))}
+              centerValue={compactCurrency(stats.revenue_at_risk)}
+              centerLabel="at risk / mo"
+              valueFormatter={compactCurrency}
+            />
+          ) : (
+            <p className="text-sm" style={{ color: "var(--text-muted)" }}>
+              No at-risk customers above the current threshold.
+            </p>
+          )}
+        </Card>
       </div>
 
-      <Card
-        title="Revenue at risk by segment"
-        action={
-          <span className="text-[11.5px]" style={{ color: "var(--text-muted)" }}>
-            Monthly recurring revenue, whole at-risk population
-          </span>
-        }
-      >
-        {revenueAtRisk && revenueAtRisk.buckets.length > 0 ? (
-          <ChurnBarChart
-            data={revenueAtRisk.buckets.map((b) => ({ label: b.segment, value: b.revenue_at_risk }))}
-            valueFormatter={compactCurrency}
-            layout="horizontal"
-            height={220}
-          />
-        ) : (
-          <p className="text-sm" style={{ color: "var(--text-muted)" }}>
-            No at-risk customers above the current threshold.
-          </p>
-        )}
-      </Card>
+      {/* Row 3 - change over time beside the retention funnel */}
+      <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+        <Card
+          title="Customer base growth"
+          action={<span className="text-[11.5px]" style={{ color: "var(--text-muted)" }}>Cumulative, by batch</span>}
+        >
+          {growth.length > 0 ? (
+            <TrendAreaChart data={growth} valueFormatter={compactCount} tooltipLabel="Customers" height={240} />
+          ) : (
+            <LoadingState />
+          )}
+        </Card>
+
+        <Card
+          title="Retention funnel by tenure"
+          action={<span className="text-[11.5px]" style={{ color: "var(--text-muted)" }}>Share still active at each stage</span>}
+        >
+          {funnel.length > 0 ? (
+            <div className="py-3">
+              <FunnelChart stages={funnel} />
+            </div>
+          ) : (
+            <LoadingState />
+          )}
+        </Card>
+      </div>
+
+      {/* Row 4 - three operational feeds */}
+      <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
+        <Card title="Recent batches">
+          <FeedList items={batchFeed} emptyMessage="No batches ingested yet." />
+        </Card>
+        <Card title="Model versions">
+          <FeedList items={modelFeed} emptyMessage="No models trained yet." />
+        </Card>
+        <Card title="Feature drift">
+          <FeedList items={driftFeed} emptyMessage="No drift measured yet." />
+        </Card>
+      </div>
     </div>
   );
 }

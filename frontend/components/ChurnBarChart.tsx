@@ -103,7 +103,17 @@ export default function ChurnBarChart({
             with secondary encoding. These labels are that encoding, so the
             bars stay readable without relying on fill contrast (and match
             the reference, which labels every bar end). */}
-        <Bar dataKey="value" fill="var(--series-1)" radius={layout === "horizontal" ? [0, 4, 4, 0] : [4, 4, 0, 0]} maxBarSize={48}>
+        {/* Animation off, matching the donut and area charts: bars grow
+            from zero on every re-render, so changing the threshold makes
+            the whole row flicker, and any screenshot taken mid-transition
+            catches empty bars. */}
+        <Bar
+          dataKey="value"
+          fill="var(--series-1)"
+          radius={layout === "horizontal" ? [0, 4, 4, 0] : [4, 4, 0, 0]}
+          maxBarSize={48}
+          isAnimationActive={false}
+        >
           <LabelList
             dataKey="value"
             position={layout === "horizontal" ? "right" : "top"}
