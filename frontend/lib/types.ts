@@ -160,6 +160,10 @@ export interface ModelVersionMetadata {
 
 export interface ModelHistoryResponse {
   versions: ModelVersionMetadata[];
+  /** Which version is actually loaded and serving. Not necessarily the
+   *  last entry - the registry can resolve an older artifact than the
+   *  newest on disk. */
+  serving_version: string | null;
 }
 
 export interface IngestionLogRow {

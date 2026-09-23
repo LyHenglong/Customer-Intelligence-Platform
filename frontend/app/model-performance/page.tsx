@@ -50,6 +50,7 @@ function ConfusionMatrix({ matrix }: { matrix: number[][] }) {
 
 export default function ModelPerformancePage() {
   const [history, setHistory] = useState<ModelVersionMetadata[]>([]);
+  const [servingVersion, setServingVersion] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -57,7 +58,10 @@ export default function ModelPerformancePage() {
     let cancelled = false;
     getModelHistory()
       .then((res) => {
-        if (!cancelled) setHistory(res.versions);
+        if (!cancelled) {
+          setHistory(res.versions);
+          setServingVersion(res.serving_version);
+        }
       })
       .catch((e: unknown) => {
         if (!cancelled) setError(e instanceof ApiError ? e.message : "Failed to load model history.");
@@ -74,7 +78,14 @@ export default function ModelPerformancePage() {
   if (loading) return <LoadingState />;
   if (history.length === 0) return <ErrorState message="No trained model versions found." />;
 
-  const latest = history[history.length - 1];
+  // The version actually being served, which is not necessarily the newest
+  // on disk - the registry can resolve an older artifact (e.g. an MLflow
+  // "champion" alias left pinned to a previous version after a retrain
+  // saved but failed to register). Labelling the newest file "current
+  // production model" misreported the live threshold and confusion matrix.
+  const serving = history.find((h) => h.version === servingVersion);
+  const latest = serving ?? history[history.length - 1];
+  const isStale = Boolean(servingVersion) && history[history.length - 1]?.version !== servingVersion;
   // Full version as the category key, not a date-only slice: several
   // retrains can land on the same day, and duplicate category keys make
   // Recharts drop line segments between them (and render a row of
@@ -95,6 +106,13 @@ export default function ModelPerformancePage() {
         <h2 className="mb-2 text-sm font-semibold" style={{ color: "var(--text-primary)" }}>
           Current production model - {latest.version}
         </h2>
+        {isStale && (
+          <p className="mb-2 text-xs" style={{ color: "var(--status-warning)" }}>
+            A newer artifact ({history[history.length - 1].version}) exists but is not
+            being served - the model registry resolves to the version above. Check the
+            MLflow &quot;champion&quot; alias if that is unintended.
+          </p>
+        )}
         <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
           <KpiCard label="Precision (churn)" value={latest.precision_churn?.toFixed(3) ?? "-"} />
           <KpiCard label="Recall (churn)" value={latest.recall_churn?.toFixed(3) ?? "-"} />

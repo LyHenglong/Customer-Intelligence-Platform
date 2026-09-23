@@ -70,10 +70,15 @@ def _scored_df():
 def test_overview_stats_combines_the_expected_sources(monkeypatch, fake_churn_state):
     monkeypatch.setattr(dashboard_queries, "load_overall_stats", lambda: {"total_customers": 1000, "churn_rate": 0.1})
     monkeypatch.setattr(dashboard_queries, "score_all_customers", lambda *a, **kw: _scored_df())
-    monkeypatch.setattr(dashboard_queries, "load_all_churn_metadata", lambda: [{"roc_auc": 0.65}])
+    # Carries a version now: model_auc is looked up by the serving version
+    # rather than taken from the newest file, so unversioned metadata
+    # correctly matches nothing.
+    monkeypatch.setattr(dashboard_queries, "load_all_churn_metadata",
+                        lambda: [{"version": "TESTV1", "roc_auc": 0.65}])
     monkeypatch.setattr(dashboard_queries, "column_importances", lambda pipeline: {"tenure": 0.4, "contract": 0.6})
 
     with TestClient(api_module.app) as client:
+        monkeypatch.setitem(api_module._state, "churn_version", "TESTV1")
         response = client.get("/overview/stats", params={"threshold": 0.3})
 
     assert response.status_code == 200
@@ -298,11 +303,73 @@ def test_get_customer_returns_200_with_found_false_on_a_miss(monkeypatch):
 def test_model_history_returns_raw_metadata_list(monkeypatch):
     monkeypatch.setattr(dashboard_queries, "load_all_churn_metadata", lambda: [{"version": "V1"}, {"version": "V2"}])
 
+    # churn_version is set *inside* the context on purpose: TestClient's
+    # __enter__ fires the real startup handler, which FastAPI captured at
+    # decoration time, so patching api_module.load_models beforehand does
+    # not stop it repopulating _state. Same workaround as
+    # test_overview_stats_503s_when_churn_model_not_loaded above.
     with TestClient(api_module.app) as client:
+        monkeypatch.setitem(api_module._state, "churn_version", "V2")
         response = client.get("/model-history")
 
     assert response.status_code == 200
-    assert response.json() == {"versions": [{"version": "V1"}, {"version": "V2"}]}
+    assert response.json() == {
+        "versions": [{"version": "V1"}, {"version": "V2"}],
+        "serving_version": "V2",
+    }
+
+
+def test_model_history_reports_the_served_version_not_the_newest(monkeypatch):
+    """Regression: the registry can resolve an older artifact than the
+    newest on disk - an MLflow "champion" alias pinned to a previous
+    version, or a retrain that saved but failed to register. The frontend
+    labelled the last entry "current production model", so it showed a
+    non-serving model's threshold and confusion matrix as live."""
+    monkeypatch.setattr(dashboard_queries, "load_all_churn_metadata",
+                        lambda: [{"version": "V1"}, {"version": "V2_NEWEST"}])
+
+    with TestClient(api_module.app) as client:
+        monkeypatch.setitem(api_module._state, "churn_version", "V1")
+        body = client.get("/model-history").json()
+
+    assert body["serving_version"] == "V1"
+    assert body["versions"][-1]["version"] == "V2_NEWEST"
+
+
+def test_overview_stats_auc_describes_the_served_model(monkeypatch, fake_churn_state):
+    """Regression: model_auc came from the newest metadata file while
+    model_version came from the loaded model, so a single response paired
+    one model's version with another model's score."""
+    monkeypatch.setattr(dashboard_queries, "load_overall_stats", lambda: {"total_customers": 3, "churn_rate": 0.1})
+    monkeypatch.setattr(dashboard_queries, "score_all_customers", lambda *a, **kw: _scored_df())
+    monkeypatch.setattr(dashboard_queries, "column_importances", lambda pipeline: {})
+    monkeypatch.setattr(dashboard_queries, "load_all_churn_metadata", lambda: [
+        {"version": "TESTV1", "roc_auc": 0.61},
+        {"version": "NEWER_BUT_NOT_SERVED", "roc_auc": 0.99},
+    ])
+
+    with TestClient(api_module.app) as client:
+        monkeypatch.setitem(api_module._state, "churn_version", "TESTV1")
+        body = client.get("/overview/stats", params={"threshold": 0.3}).json()
+
+    assert body["model_version"] == "TESTV1"
+    assert body["model_auc"] == 0.61
+
+
+def test_overview_stats_auc_is_null_when_served_version_has_no_metadata(monkeypatch, fake_churn_state):
+    """Absent is better than wrong: rather than falling back to some other
+    model's AUC, report nothing."""
+    monkeypatch.setattr(dashboard_queries, "load_overall_stats", lambda: {"total_customers": 3, "churn_rate": 0.1})
+    monkeypatch.setattr(dashboard_queries, "score_all_customers", lambda *a, **kw: _scored_df())
+    monkeypatch.setattr(dashboard_queries, "column_importances", lambda pipeline: {})
+    monkeypatch.setattr(dashboard_queries, "load_all_churn_metadata",
+                        lambda: [{"version": "SOMETHING_ELSE", "roc_auc": 0.99}])
+
+    with TestClient(api_module.app) as client:
+        monkeypatch.setitem(api_module._state, "churn_version", "TESTV1")
+        body = client.get("/overview/stats", params={"threshold": 0.3}).json()
+
+    assert body["model_auc"] is None
 
 
 def test_pipeline_status_combines_all_sources(monkeypatch):
