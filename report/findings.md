@@ -133,6 +133,67 @@ than an escape from it. What the original audit got right is that no
 amount of *data* helps; what it missed is that some of the gap to the top
 of the band was tuning, not data generation.
 
+### 2b. Where the ceiling actually comes from, and what the same code does on real data
+
+Section 2 asserted the 0.65–0.68 band is a property of the synthetic
+data's generated signal. That claim is now measured rather than inferred,
+by scoring every feature *on its own* (AUC of that single column against
+the churn label; 0.5 is a coin flip):
+
+| feature | univariate AUC |
+| --- | --- |
+| contract | 0.6139 |
+| customer_satisfaction | 0.5748 |
+| num_complaints | 0.5667 |
+| num_service_calls | 0.5642 |
+| *(everything else)* | *< 0.54* |
+
+**27 of the 38 features are below 0.52 — individually indistinguishable
+from noise.** The best single feature carries 0.614, and the full model
+reaches ~0.666, so the model is combining the few weak signals
+productively rather than underperforming. There is simply not much to
+find. `contract` separates churn 4.95x (27.7% month-to-month vs 5.6%
+two-year), which is why segment-level analysis in this project is
+consistently more informative than individual-level prediction.
+
+To confirm the modelling code is not the limitation,
+`src/model/train_churn_telco.py` runs the *identical* method - same
+three-way split, same sigmoid calibration, same recall-floor threshold
+rule, same tuned LightGBM hyperparameters - against the real IBM Telco
+dataset (`blastchar/telco-customer-churn`):
+
+| | Synthetic (production) | Real IBM Telco |
+| --- | --- | --- |
+| Rows | 1,000,000 | 7,043 |
+| Features individually ≈ noise | 27 of 38 | **2 of 19** |
+| Best single feature | contract, 0.614 | tenure, 0.740 |
+| 5-fold CV ROC AUC | ~0.678 | **0.8347 ± 0.0115** |
+| Held-out test ROC AUC | 0.666 | **0.8269** |
+| Precision at recall ≈ 0.60 | 0.157 | **0.598** |
+
+Same code, same hyperparameters, +0.16 AUC. The precision difference is
+the part that matters commercially: on real data 60% of flagged customers
+genuinely churn, against 16% on the synthetic data, so nearly four times
+less retention budget is spent on customers who were never going to
+leave.
+
+**This does not make the Telco model the better model to ship**, and it is
+deliberately not served (see that module's docstring - it is named
+`telco_churn_*` specifically so the production `churn_model_*` glob cannot
+pick it up, and a regression test pins that). It is 7,043 rows against
+1,000,000, on a different schema, and none of the platform's scale
+engineering - streaming reads, batch ingestion, drift monitoring - is
+exercised by it. The two answer different questions: the synthetic
+pipeline demonstrates the *system*, this benchmark demonstrates the
+*modelling*. Quoting one dataset's AUC as though it were the other's would
+be misleading in either direction.
+
+**An honest note on targets:** ~0.83 is close to the practical ceiling for
+churn prediction even on good real data; published work on this dataset
+clusters in the 0.83–0.85 range. Production churn models typically land
+0.75–0.85. A churn AUC of 0.90+ usually indicates target leakage rather
+than a better model, and should be treated as a bug report, not a result.
+
 ## 3. Top churn risk factors
 
 LightGBM feature importances (individual features, not grouped), top

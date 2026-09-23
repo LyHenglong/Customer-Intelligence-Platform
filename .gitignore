@@ -6,6 +6,9 @@ kaggle.json
 # Data (raw batches and DuckDB files are regenerated, not versioned)
 data/raw/*.csv
 data/raw_download/
+# Third-party Kaggle data, downloaded on first run by
+# src/model/train_churn_telco.py - not ours to redistribute, same as above.
+data/raw_telco/
 data/processed/
 *.duckdb
 *.duckdb.wal
