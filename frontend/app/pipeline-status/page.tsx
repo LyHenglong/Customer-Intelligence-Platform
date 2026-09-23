@@ -5,6 +5,7 @@ import { getPipelineStatus, ApiError } from "@/lib/api-client";
 import type { PipelineStatusResponse } from "@/lib/types";
 import KpiCard from "@/components/KpiCard";
 import PageHeader from "@/components/PageHeader";
+import Card from "@/components/Card";
 import LoadingState from "@/components/LoadingState";
 import ErrorState from "@/components/ErrorState";
 
@@ -62,10 +63,7 @@ export default function PipelineStatusPage() {
         </div>
       </div>
 
-      <div className="rounded-lg border" style={{ borderColor: "var(--border)" }}>
-        <div className="border-b px-4 py-2 text-xs font-medium" style={{ borderColor: "var(--border)", color: "var(--text-muted)" }}>
-          Ingestion log
-        </div>
+      <Card title="Ingestion log" bodyClassName="px-0">
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
             <thead>
@@ -88,10 +86,10 @@ export default function PipelineStatusPage() {
             </tbody>
           </table>
         </div>
-      </div>
+      </Card>
 
       <div>
-        <h2 className="mb-2 text-sm font-semibold" style={{ color: "var(--text-primary)" }}>
+        <h2 className="mb-3 text-[13.5px] font-semibold" style={{ color: "var(--text-primary)" }}>
           Feature drift (PSI)
         </h2>
         <div className="mb-3 grid grid-cols-3 gap-4">
@@ -102,7 +100,7 @@ export default function PipelineStatusPage() {
         {data.drift.length === 0 ? (
           <p className="text-sm" style={{ color: "var(--text-muted)" }}>No drift data yet.</p>
         ) : (
-          <div className="overflow-x-auto rounded-lg border" style={{ borderColor: "var(--border)" }}>
+          <div className="overflow-x-auto rounded-xl border" style={{ borderColor: "var(--border)", background: "var(--surface-card)", boxShadow: "var(--shadow-card)" }}>
             <table className="w-full text-sm">
               <thead>
                 <tr className="text-left" style={{ color: "var(--text-muted)" }}>
@@ -126,12 +124,9 @@ export default function PipelineStatusPage() {
       </div>
 
       {data.latest_retrain_summary && (
-        <div className="rounded-lg border p-4" style={{ borderColor: "var(--border)", background: "var(--surface-card)" }}>
-          <h2 className="mb-2 text-sm font-semibold" style={{ color: "var(--text-primary)" }}>
-            Latest retrain summary
-          </h2>
+        <Card title="Latest retrain summary">
           <p className="text-sm" style={{ color: "var(--text-secondary)" }}>{data.latest_retrain_summary.summary_text}</p>
-        </div>
+        </Card>
       )}
     </div>
   );

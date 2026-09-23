@@ -5,6 +5,7 @@ import Link from "next/link";
 import { getCustomer, postOutreachDraft, ApiError } from "@/lib/api-client";
 import type { CustomerLookupResult, OutreachDraftResponse } from "@/lib/types";
 import KpiCard from "@/components/KpiCard";
+import Card from "@/components/Card";
 import ShapFactorList from "@/components/ShapFactorList";
 import LoadingState from "@/components/LoadingState";
 import ErrorState from "@/components/ErrorState";
@@ -51,10 +52,10 @@ export default function CustomerDetailPage({ params }: { params: Promise<{ id: s
   return (
     <div className="space-y-6">
       <div>
-        <Link href="/customers" className="text-xs underline" style={{ color: "var(--series-1)" }}>
+        <Link href="/customers" className="text-[12.5px] font-medium" style={{ color: "var(--brand-strong)" }}>
           ← Back to customers
         </Link>
-        <h1 className="mt-1 text-lg font-semibold" style={{ color: "var(--text-primary)" }}>
+        <h1 className="mt-1 text-[26px] font-bold leading-tight tracking-tight" style={{ color: "var(--text-primary)" }}>
           {customer.customer_id}
         </h1>
       </div>
@@ -64,26 +65,21 @@ export default function CustomerDetailPage({ params }: { params: Promise<{ id: s
           label="Churn probability"
           value={customer.churn_probability !== null ? `${(customer.churn_probability * 100).toFixed(1)}%` : "-"}
           sublabel={customer.risk_status ? `${customer.risk_status} risk (threshold ${customer.churn_threshold?.toFixed(2)})` : undefined}
+          tone="danger"
         />
-        <KpiCard label="Contract" value={p?.contract ?? "-"} />
-        <KpiCard label="Tenure" value={p?.tenure !== null && p?.tenure !== undefined ? `${p.tenure} mo` : "-"} />
-        <KpiCard label="Monthly charges" value={p?.monthlycharges ? `$${p.monthlycharges.toFixed(2)}` : "-"} />
+        <KpiCard label="Contract" value={p?.contract ?? "-"} tone="info" />
+        <KpiCard label="Tenure" value={p?.tenure !== null && p?.tenure !== undefined ? `${p.tenure} mo` : "-"} tone="violet" />
+        <KpiCard label="Monthly charges" value={p?.monthlycharges ? `$${p.monthlycharges.toFixed(2)}` : "-"} tone="brand" />
       </div>
 
       {customer.shap_factors.length > 0 && (
-        <div className="rounded-lg border p-4" style={{ borderColor: "var(--border)", background: "var(--surface-card)" }}>
-          <h2 className="mb-2 text-sm font-semibold" style={{ color: "var(--text-primary)" }}>
-            Risk factors
-          </h2>
+        <Card title="Risk factors">
           <ShapFactorList factors={customer.shap_factors} />
-        </div>
+        </Card>
       )}
 
       {customer.recommendation.length > 0 && (
-        <div className="rounded-lg border p-4" style={{ borderColor: "var(--border)", background: "var(--surface-card)" }}>
-          <h2 className="mb-2 text-sm font-semibold" style={{ color: "var(--text-primary)" }}>
-            Recommended services
-          </h2>
+        <Card title="Recommended services">
           <ul className="space-y-1 text-sm" style={{ color: "var(--text-secondary)" }}>
             {customer.recommendation.map((r) => (
               <li key={r.service}>
@@ -91,25 +87,24 @@ export default function CustomerDetailPage({ params }: { params: Promise<{ id: s
               </li>
             ))}
           </ul>
-        </div>
+        </Card>
       )}
 
-      <div className="rounded-lg border p-4" style={{ borderColor: "var(--border)", background: "var(--surface-card)" }}>
-        <div className="flex items-center justify-between">
-          <h2 className="text-sm font-semibold" style={{ color: "var(--text-primary)" }}>
-            AI explanation &amp; outreach draft
-          </h2>
-          {!draft && (
+      <Card
+        title="AI explanation & outreach draft"
+        action={
+          !draft ? (
             <button
               type="button"
               onClick={generateDraft}
-              className="rounded-md px-3 py-1.5 text-xs font-medium text-white"
-              style={{ background: "var(--series-1)" }}
+              className="rounded-lg px-3.5 py-2 text-[12px] font-semibold text-white"
+              style={{ background: "var(--brand)" }}
             >
               Generate
             </button>
-          )}
-        </div>
+          ) : undefined
+        }
+      >
         {draft === "loading" && <p className="mt-2 text-sm" style={{ color: "var(--text-muted)" }}>Generating...</p>}
         {draft === "error" && <p className="mt-2 text-sm" style={{ color: "var(--status-critical)" }}>Failed to generate.</p>}
         {draft && typeof draft === "object" && (
@@ -125,7 +120,7 @@ export default function CustomerDetailPage({ params }: { params: Promise<{ id: s
             )}
           </div>
         )}
-      </div>
+      </Card>
     </div>
   );
 }

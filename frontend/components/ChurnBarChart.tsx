@@ -61,7 +61,10 @@ export default function ChurnBarChart({
       <BarChart
         data={data}
         layout={layout === "horizontal" ? "vertical" : "horizontal"}
-        margin={{ top: 8, right: 12, bottom: 8, left: 8 }}
+        // Top margin leaves room for the position="top" value labels, which
+        // were otherwise clipped against the card edge; right margin does
+        // the same for the horizontal layout's position="right" labels.
+        margin={{ top: 18, right: 44, bottom: 8, left: 8 }}
       >
         <CartesianGrid strokeDasharray="3 3" stroke="var(--gridline)" horizontal={layout !== "horizontal"} vertical={layout === "horizontal"} />
         {layout === "horizontal" ? (
