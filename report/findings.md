@@ -84,6 +84,55 @@ and probability calibration, which makes the scores themselves trustworthy
 (both in Section 6). This ~0.68 ceiling looks like a genuine property of
 the synthetic data's generated signal, not a modeling gap.
 
+### 2a. Hyperparameter tuning (a partial correction to the above)
+
+The audit above varied model *family*, imbalance handling and training
+size, but never the hyperparameters — LightGBM ran throughout on the
+defaults picked when the family was chosen (`n_estimators=300`,
+`max_depth=6`, `learning_rate=0.1`).
+`notebooks/churn_hyperparameter_sweep.py` pulls that lever: 9 configs,
+each scored by 4-fold cross-validation on identical folds over 200K rows,
+with the adoption rule fixed before any numbers were seen (a candidate
+must clear the baseline by more than one baseline fold-to-fold standard
+deviation, because this dataset's variance is large enough to manufacture
+convincing wins).
+
+| config | CV AUC | vs baseline |
+| --- | --- | --- |
+| **`max_depth=4, n_estimators=600, lr=0.05`** | **0.6778 ± 0.0026** | **+0.0127** |
+| `max_depth=5` + subsampling + L2 + `min_child_samples=50` | 0.6745 ± 0.0023 | +0.0094 |
+| `max_depth=6` + `reg_alpha=1.0, reg_lambda=5.0` | 0.6720 ± 0.0017 | +0.0069 |
+| baseline (`max_depth=6, n_estimators=300, lr=0.1`) | 0.6651 ± 0.0014 | — |
+| `max_depth=-1, num_leaves=63` | 0.6533 ± 0.0026 | **−0.0118** |
+
+The winner clears the threshold by ~9x the baseline std, and the result
+is monotone in one direction rather than a lucky fold: **shallower is
+better**. Depth 8 barely moved (+0.0034) and removing the depth limit
+entirely actively hurt, so the old configuration was spending capacity
+memorising noise in a weak-signal target. More boosting rounds at a lower
+learning rate pay for the lost depth.
+
+Retrained into production, this transferred almost exactly as the CV
+predicted (+0.0131 observed against +0.0127 predicted):
+
+| metric | previous (`20260921T040029Z`) | tuned (`20260923T040125Z`) |
+| --- | --- | --- |
+| ROC AUC | 0.6529 | **0.6660** |
+| Precision (churn) | 0.1514 | **0.1573** |
+| Recall (churn) | 0.6001 | 0.6001 |
+| F1 (churn) | 0.2418 | **0.2493** |
+
+Recall is unchanged by construction — the threshold is chosen to guarantee
+recall ≥ 0.60 — so the gain shows up as precision at that fixed recall:
+~4% relatively fewer wasted retention offers for the same churners caught.
+
+**This does not repeal the ceiling, it locates it more precisely.** 0.666
+still sits inside the 0.65–0.68 band, and the held-out test score from the
+sweep itself (0.6816, on its own 50K split) is the top of that band rather
+than an escape from it. What the original audit got right is that no
+amount of *data* helps; what it missed is that some of the gap to the top
+of the band was tuning, not data generation.
+
 ## 3. Top churn risk factors
 
 LightGBM feature importances (individual features, not grouped), top
