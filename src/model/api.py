@@ -95,41 +95,11 @@ app.add_middleware(
 
 _state: dict = {"churn": None, "churn_version": None, "recommender": None, "recommender_version": None}
 
-# Cache for dashboard_queries.score_all_customers (~1M-row streaming pass
-# on every call - too expensive to run on every request). Hand-rolled
-# in-process TTL cache, not Redis/a materialized view: matches this
-# project's consistent "avoid unnecessary infrastructure" choices
-# elsewhere (e.g. pgvector instead of a second DB). 600s staleness is the
-# accepted tolerance for this computation.
-#
-# The lock spans the recompute itself, not just the check-and-return: a
-# check-then-release-then-recompute pattern would let two concurrent
-# cache-miss requests both kick off a full 1M-row streaming score at
-# once, doubling peak memory on a container already sized once for real
-# (see docker-compose.yml's api mem_limit, raised after a reproduced
-# OOM). Holding the lock across recompute serializes that instead -
-# bounded added latency for the second request, not doubled memory.
-# Single-worker uvicorn (no --workers flag in docker/Dockerfile.api) - this
-# lock only needs to arbitrate threads within one process, not processes.
-#
-# Multi-replica caveat, not silently glossed over: if render.yaml's
-# numInstances is ever enabled, each replica holds its own independent
-# copy of this cache and independently pays the recompute cost -
-# correctness-neutral (every replica reads the same Postgres data and
-# model artifact, so they converge to identical scores) but resource-
-# wasteful. Not fixed here: real added infrastructure (a shared cache)
-# for a problem that doesn't exist at Render's free-tier scale (capped
-# at one instance regardless).
-_scored_cache: dict = {"data": None, "expires_at": 0.0, "version": None}
-_scored_lock = threading.Lock()
-# An hour, not the original 10 minutes. The scores this caches only move
-# when a batch is ingested (a manually triggered DAG run here) or a model
-# is promoted - and a model promotion already invalidates this cache
-# independently, since entries are keyed by churn_version. A 10-minute TTL
-# therefore bought no extra freshness in practice, while guaranteeing that
-# any visitor arriving after a quiet spell paid a ~35-110s scoring pass and
-# saturated the single uvicorn worker while doing it.
-_SCORED_CACHE_TTL_SECONDS = 3600
+# The scored-population cache now lives in
+# src/model/dashboard_queries.py (get_scored_customers / clear_scored_cache)
+# so the AI tool layer can read the same frame instead of re-scoring the
+# whole warehouse for itself. Its TTL, locking and multi-replica caveat are
+# documented there.
 
 # /at-risk's SHAP + recommendation loop is real per-request CPU work,
 # independent of the (cached) population-scoring pass above. An
@@ -169,7 +139,23 @@ def _warm_rag_models() -> None:
     pass claims the memory.
 
     Best-effort like the scoring warm: RAG degrades to no retrieval
-    evidence rather than taking the API down."""
+    evidence rather than taking the API down.
+
+    Warms both models a hybrid_search call actually uses - the embedder
+    for the vector-search leg, the reranker for the cross-encoder leg.
+    Only the reranker used to be warmed here, so the embedder's ~90MB
+    SentenceTransformer (src/ai/rag/embeddings.py's own lazy singleton)
+    still loaded cold on a request - one of the two model loads hiding
+    inside a measured 44.5s hybrid_search call."""
+    try:
+        from src.ai.rag.embeddings import embed_query
+
+        t0 = time.monotonic()
+        embed_query("warm-up query")
+        log.info("RAG embedder ready in %.1fs", time.monotonic() - t0)
+    except Exception:
+        log.exception("RAG embedder warm failed; retrieval will retry per-request")
+
     try:
         from src.ai.rag.reranker import _get_reranker
 
@@ -222,19 +208,14 @@ def start_cache_warm() -> None:
 
 
 def _get_scored_customers() -> pd.DataFrame:
-    """Cached wrapper around dashboard_queries.score_all_customers - see
-    the module-level comment on _scored_cache/_scored_lock for why."""
-    with _scored_lock:
-        now = time.monotonic()
-        if (
-            _scored_cache["data"] is not None
-            and _scored_cache["version"] == _state["churn_version"]
-            and now < _scored_cache["expires_at"]
-        ):
-            return _scored_cache["data"]
-        df = dashboard_queries.score_all_customers(_state["churn"], _state["churn_version"])
-        _scored_cache.update(data=df, expires_at=now + _SCORED_CACHE_TTL_SECONDS, version=_state["churn_version"])
-        return df
+    """The scored population, from the cache shared with the AI tool layer.
+
+    The cache lives in dashboard_queries rather than here so that
+    src/ai/tools/churn_tool.py can read the same frame. It used to be
+    private to this module, which meant the assistant re-scored all
+    1,000,000 customers from Postgres while an identical frame sat in this
+    process's memory - 209s of a 211s request."""
+    return dashboard_queries.get_scored_customers(_state["churn"], _state["churn_version"])
 
 
 class ChurnRequest(BaseModel):

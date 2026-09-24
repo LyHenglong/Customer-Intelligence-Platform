@@ -20,6 +20,7 @@ import pandas as pd
 
 from src.ai.schemas import ChurnAnalysisResult
 from src.ai.tools._artifacts import load_churn_artifact
+from src.model import dashboard_queries
 from src.model.train_churn import ALL_FEATURES as CHURN_FEATURES
 from src.warehouse import stream_query
 
@@ -64,6 +65,54 @@ def clear_cache() -> None:
         _cache.clear()
 
 
+def _from_scored_cache(filters: dict, churn_artifact, churn_version) -> ChurnAnalysisResult | None:
+    """Answers from the already-scored population if it is in memory.
+
+    The serving process keeps every customer scored in
+    dashboard_queries' cache (warmed at API startup, an hour's TTL), and
+    since that frame carries the categorical segment columns plus the
+    churn label, every figure this tool returns can be computed from it
+    with a boolean mask. Re-streaming and re-scoring 1,000,000 rows from
+    Postgres to recompute what is already in RAM cost 209s of a measured
+    211s assistant request.
+
+    Returns None rather than computing the frame when the cache is cold:
+    the caller then does its own filtered query, which for a narrow
+    segment is far cheaper than a full population pass, and nobody waits
+    on somebody else's multi-minute scoring run."""
+    if churn_artifact is None:
+        return None
+    frame = dashboard_queries.peek_scored_customers(churn_version)
+    if frame is None or "churn" not in frame.columns:
+        return None
+
+    for column, value in filters.items():
+        if column not in frame.columns:
+            return None  # not a column that rides along; fall back to SQL
+        frame = frame[frame[column] == value]
+
+    population_size = int(len(frame))
+    if population_size == 0:
+        return ChurnAnalysisResult(
+            population_size=0, current_churn_rate=0.0, predicted_high_risk_count=0,
+            mean_churn_probability=0.0, median_churn_probability=0.0,
+            model_version=churn_version, threshold=0.0, filters_applied=filters,
+        )
+
+    proba = frame["churn_probability"].to_numpy()
+    threshold = float(churn_artifact.get("threshold", 0.5))
+    return ChurnAnalysisResult(
+        population_size=population_size,
+        current_churn_rate=round(float(frame["churn"].mean()), 4),
+        predicted_high_risk_count=int((proba >= threshold).sum()),
+        mean_churn_probability=round(float(proba.mean()), 4),
+        median_churn_probability=round(float(np.median(proba)), 4),
+        model_version=churn_version,
+        threshold=round(threshold, 4),
+        filters_applied=filters,
+    )
+
+
 def _compute_churn_analysis(filters: dict | None = None, batch_size: int = 25_000) -> ChurnAnalysisResult:
     filters = filters or {}
     unknown = set(filters) - _ALLOWED_FILTER_COLUMNS
@@ -71,6 +120,12 @@ def _compute_churn_analysis(filters: dict | None = None, batch_size: int = 25_00
         raise ValueError(
             f"unsupported churn_analysis filter(s) {unknown}; allowed: {sorted(_ALLOWED_FILTER_COLUMNS)}"
         )
+
+    artifact_for_cache, version_for_cache = load_churn_artifact()
+    from_cache = _from_scored_cache(filters, artifact_for_cache, version_for_cache)
+    if from_cache is not None:
+        log.info("churn_analysis served from the shared scored-population cache (filters=%s)", filters or "none")
+        return from_cache
 
     where_clause, params = "", None
     if filters:
