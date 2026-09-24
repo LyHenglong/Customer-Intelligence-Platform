@@ -13,6 +13,8 @@ from __future__ import annotations
 import json
 import logging
 import os
+import threading
+import time
 from pathlib import Path
 
 import numpy as np
@@ -20,6 +22,7 @@ import pandas as pd
 
 from src.model.train_churn import ALL_FEATURES as CHURN_FEATURES
 from src.model.train_churn import CATEGORICAL_FEATURES as CHURN_CATEGORICAL
+from src.model.train_churn import TARGET as CHURN_TARGET
 from src.warehouse import get_pg_conn, stream_query
 
 log = logging.getLogger("model.dashboard_queries")
@@ -65,11 +68,15 @@ def score_all_customers(_churn_artifact, churn_version: str, batch_size: int = 2
     population in-process instead of re-fetching full rows from Postgres
     for a capped subset.
     """
-    score_cols = ["customer_id"] + CHURN_FEATURES
+    # "churn" is the label, not a feature, so it has to be asked for
+    # explicitly. It rides along (1M int8 ~ 1MB) so callers can compute the
+    # observed churn rate for any slice of this frame without going back to
+    # the warehouse - see src/ai/tools/churn_tool.py.
+    score_cols = ["customer_id", CHURN_TARGET] + CHURN_FEATURES
     score_cols = list(dict.fromkeys(score_cols))
     pipeline = _churn_artifact["pipeline"]
 
-    ids, scores, charges = [], [], []
+    ids, scores, charges, labels = [], [], [], []
     segments: dict[str, list] = {c: [] for c in CHURN_CATEGORICAL}
 
     def _score_batch(batch: pd.DataFrame) -> pd.DataFrame:
@@ -80,6 +87,7 @@ def score_all_customers(_churn_artifact, churn_version: str, batch_size: int = 2
         ids.append(batch["customer_id"].to_numpy())
         scores.append(pipeline.predict_proba(X)[:, 1].astype(np.float32))
         charges.append(batch["monthlycharges"].to_numpy(dtype=np.float32))
+        labels.append(pd.to_numeric(batch[CHURN_TARGET], errors="coerce").fillna(0).to_numpy(dtype=np.int8))
         for c in CHURN_CATEGORICAL:
             segments[c].append(batch[c].to_numpy())
         # Return an empty frame: stream_query concatenates whatever comes
@@ -97,10 +105,61 @@ def score_all_customers(_churn_artifact, churn_version: str, batch_size: int = 2
         "customer_id": np.concatenate(ids),
         "churn_probability": np.concatenate(scores),
         "monthlycharges": np.concatenate(charges),
+        "churn": np.concatenate(labels),
     })
     for c in CHURN_CATEGORICAL:
         frame[c] = pd.Categorical(np.concatenate(segments[c]))
     return frame
+
+
+# One scored population, shared by every caller that needs it.
+#
+# There used to be two: src/model/api.py cached this frame for the
+# dashboard endpoints, while src/ai/tools/churn_tool.py ran its own
+# independent streaming pass for the assistant. So an assistant question
+# re-scored 1,000,000 customers that were already scored and sitting in
+# this process's memory - measured at 209s of a 211s request.
+#
+# The lock spans the recompute rather than just the lookup, so two
+# concurrent misses serialise instead of both starting a full pass and
+# doubling peak memory in a container already sized once for one.
+_SCORED_CACHE_TTL_SECONDS = int(os.environ.get("SCORED_CACHE_TTL_SECONDS", "3600"))
+_scored_cache: dict = {"data": None, "expires_at": 0.0, "version": None}
+_scored_lock = threading.Lock()
+
+
+def get_scored_customers(churn_artifact, churn_version: str) -> pd.DataFrame:
+    """Cached score_all_customers. Entries are keyed by churn_version, so
+    promoting a model invalidates this without anyone having to remember
+    to clear it."""
+    with _scored_lock:
+        now = time.monotonic()
+        cached = _scored_cache
+        if cached["data"] is not None and cached["version"] == churn_version and now < cached["expires_at"]:
+            return cached["data"]
+        frame = score_all_customers(churn_artifact, churn_version)
+        _scored_cache.update(data=frame, expires_at=now + _SCORED_CACHE_TTL_SECONDS, version=churn_version)
+        return frame
+
+
+def peek_scored_customers(churn_version: str) -> pd.DataFrame | None:
+    """The cached frame if it is present and still valid, else None -
+    never triggers a recompute.
+
+    Lets a caller that merely *prefers* the fast path (the assistant's
+    churn_analysis) use it when it is already warm and fall back to its
+    own query when it is not, without blocking on somebody else's
+    multi-minute scoring pass."""
+    with _scored_lock:
+        cached = _scored_cache
+        if cached["data"] is not None and cached["version"] == churn_version and time.monotonic() < cached["expires_at"]:
+            return cached["data"]
+    return None
+
+
+def clear_scored_cache() -> None:
+    with _scored_lock:
+        _scored_cache.update(data=None, expires_at=0.0, version=None)
 
 
 def load_overall_stats() -> dict:

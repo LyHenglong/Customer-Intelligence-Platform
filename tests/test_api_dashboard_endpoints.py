@@ -48,9 +48,12 @@ def _isolate_api_state(monkeypatch):
     # start_cache_warm at decoration time, but it resolves
     # _warm_scored_cache from module globals when it runs.
     monkeypatch.setattr(api_module, "_warm_all", lambda: None)
-    api_module._scored_cache.update(data=None, expires_at=0.0, version=None)
+    # The scored-population cache moved to dashboard_queries so the AI tool
+    # layer could share it; clearing it here keeps one test's fake frame
+    # from leaking into the next.
+    dashboard_queries.clear_scored_cache()
     yield
-    api_module._scored_cache.update(data=None, expires_at=0.0, version=None)
+    dashboard_queries.clear_scored_cache()
 
 
 @pytest.fixture
@@ -108,12 +111,11 @@ def test_cache_warm_populates_the_scored_cache(monkeypatch, fake_churn_state):
     full-population scoring pass (which also saturates the single uvicorn
     worker while it runs)."""
     monkeypatch.setattr(dashboard_queries, "score_all_customers", lambda *a, **kw: _scored_df())
-    api_module._scored_cache.update(data=None, expires_at=0.0, version=None)
+    dashboard_queries.clear_scored_cache()
 
     _REAL_WARM_SCORED_CACHE()
 
-    assert api_module._scored_cache["data"] is not None
-    assert api_module._scored_cache["version"] == "TESTV1"
+    assert dashboard_queries.peek_scored_customers("TESTV1") is not None
 
 
 def test_cache_warm_is_a_no_op_without_a_model(monkeypatch):
@@ -137,7 +139,7 @@ def test_cache_warm_failure_never_propagates(monkeypatch, fake_churn_state):
 
     _REAL_WARM_SCORED_CACHE()  # must not raise
 
-    assert api_module._scored_cache["data"] is None
+    assert dashboard_queries.peek_scored_customers("TESTV1") is None
 
 
 def test_overview_stats_503s_when_churn_model_not_loaded(monkeypatch):
