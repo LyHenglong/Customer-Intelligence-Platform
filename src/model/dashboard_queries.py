@@ -249,6 +249,14 @@ def load_precomputed_scores(churn_version: str) -> pd.DataFrame | None:
     this exact model_version (e.g. right after a retrain, before the next
     precompute run). Callers fall back to score_all_customers() in both
     cases, same as any other cache miss.
+
+    Reads via stream_query (a server-side cursor), not a plain
+    cur.fetchall() - this table holds up to 1,000,000 rows, and a plain
+    cursor buffers the *entire* result client-side before pandas sees a
+    single row (see src/warehouse.py's own module docstring - this is the
+    exact memory trap that module exists to avoid). An earlier version of
+    this function used fetchall() directly and reproduced the same OOM
+    this whole precomputed-scores path was built to eliminate.
     """
     conn = get_pg_conn()
     try:
@@ -256,23 +264,21 @@ def load_precomputed_scores(churn_version: str) -> pd.DataFrame | None:
             cur.execute("SELECT to_regclass('public.churn_scores')")
             if cur.fetchone()[0] is None:
                 return None
-            cur.execute(
-                "SELECT customer_id, churn_probability, monthlycharges, churn, "
-                "gender, education, marital_status, contract, payment_method, tenure_bucket "
-                "FROM public.churn_scores WHERE model_version = %s",
-                (churn_version,),
-            )
-            rows = cur.fetchall()
     finally:
         conn.close()
 
-    if not rows:
-        return None
-
-    frame = pd.DataFrame(rows, columns=[
+    columns = [
         "customer_id", "churn_probability", "monthlycharges", "churn",
         "gender", "education", "marital_status", "contract", "payment_method", "tenure_bucket",
-    ])
+    ]
+    frame = stream_query(
+        f"SELECT {', '.join(columns)} FROM public.churn_scores WHERE model_version = %s",
+        columns=columns,
+        params=(churn_version,),
+    )
+    if frame.empty:
+        return None
+
     frame["churn_probability"] = frame["churn_probability"].astype(np.float32)
     frame["monthlycharges"] = frame["monthlycharges"].astype(np.float32)
     frame["churn"] = frame["churn"].astype(np.int8)

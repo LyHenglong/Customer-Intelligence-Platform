@@ -145,24 +145,38 @@ def test_load_precomputed_scores_returns_none_when_table_missing(monkeypatch):
 
 
 def test_load_precomputed_scores_returns_none_when_no_rows_for_version(monkeypatch):
-    conn = _SeqConn([("public.churn_scores",), []])
+    conn = _SeqConn([("public.churn_scores",)])  # to_regclass(...) - table exists
     monkeypatch.setattr(dashboard_queries, "get_pg_conn", lambda: conn)
+    monkeypatch.setattr(
+        dashboard_queries, "stream_query",
+        lambda query, columns, **kw: pd.DataFrame(columns=columns),
+    )
 
     assert dashboard_queries.load_precomputed_scores("v1") is None
 
 
-def test_load_precomputed_scores_returns_typed_frame_when_rows_exist(monkeypatch):
-    rows = [
-        ("CUST0001", 0.42, 79.99, 1, "Male", "Bachelors", "Married", "month-to-month", "Electronic check", "0-12"),
-        ("CUST0002", 0.05, 19.50, 0, "Female", "Masters", "Single", "two_year", "Mailed check", "48-60"),
-    ]
-    conn = _SeqConn([("public.churn_scores",), rows])
+def test_load_precomputed_scores_reads_via_stream_query_not_fetchall(monkeypatch):
+    """Regression: an earlier version used a plain cursor's fetchall() on
+    this up-to-1M-row table, which buffers the entire result client-side
+    before pandas sees a row - the exact memory trap src/warehouse.py's
+    stream_query (a server-side cursor) exists to avoid. This table must
+    always be read through stream_query, never fetchall()."""
+    conn = _SeqConn([("public.churn_scores",)])  # to_regclass(...) - table exists
     monkeypatch.setattr(dashboard_queries, "get_pg_conn", lambda: conn)
+
+    def _fake_stream_query(query, columns, **kw):
+        assert "model_version" in query
+        return pd.DataFrame(
+            [("CUST0001", 0.42, 79.99, 1, "Male", "Bachelors", "Married", "month-to-month", "Electronic check", "0-12")],
+            columns=columns,
+        )
+
+    monkeypatch.setattr(dashboard_queries, "stream_query", _fake_stream_query)
 
     frame = dashboard_queries.load_precomputed_scores("v1")
 
     assert frame is not None
-    assert len(frame) == 2
+    assert len(frame) == 1
     assert list(frame.columns) == [
         "customer_id", "churn_probability", "monthlycharges", "churn",
         "gender", "education", "marital_status", "contract", "payment_method", "tenure_bucket",
