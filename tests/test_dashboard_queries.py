@@ -10,6 +10,8 @@ this suite (see tests/test_ai_tools.py) - no live database.
 
 from __future__ import annotations
 
+import numpy as np
+import pandas as pd
 import pytest
 
 from src.model import dashboard_queries
@@ -95,6 +97,125 @@ def test_load_customers_by_id_queries_with_the_given_ids(monkeypatch):
     query, params = conn.last_cursor.executed[0]
     assert "WHERE customer_id = ANY(%s)" in query
     assert params == (["CUST0001", "CUST0002"],)
+
+
+class _SeqCursor:
+    """Like _FakeCursor, but returns a fresh queued result per call instead
+    of the same one every time - needed for load_precomputed_scores, which
+    runs a to_regclass probe and the real SELECT on the same cursor."""
+
+    def __init__(self, results):
+        self._results = list(results)
+        self.executed = []
+
+    def execute(self, query, params=None):
+        self.executed.append((" ".join(query.split()), params))
+
+    def fetchone(self):
+        return self._results.pop(0)
+
+    def fetchall(self):
+        return self._results.pop(0)
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        return False
+
+
+class _SeqConn:
+    def __init__(self, results):
+        self._results = results
+        self.closed = False
+
+    def cursor(self, *a, **kw):
+        return _SeqCursor(self._results)
+
+    def close(self):
+        self.closed = True
+
+
+def test_load_precomputed_scores_returns_none_when_table_missing(monkeypatch):
+    conn = _SeqConn([(None,)])  # to_regclass(...) returns NULL - table doesn't exist
+    monkeypatch.setattr(dashboard_queries, "get_pg_conn", lambda: conn)
+
+    assert dashboard_queries.load_precomputed_scores("v1") is None
+    assert conn.closed is True
+
+
+def test_load_precomputed_scores_returns_none_when_no_rows_for_version(monkeypatch):
+    conn = _SeqConn([("public.churn_scores",), []])
+    monkeypatch.setattr(dashboard_queries, "get_pg_conn", lambda: conn)
+
+    assert dashboard_queries.load_precomputed_scores("v1") is None
+
+
+def test_load_precomputed_scores_returns_typed_frame_when_rows_exist(monkeypatch):
+    rows = [
+        ("CUST0001", 0.42, 79.99, 1, "Male", "Bachelors", "Married", "month-to-month", "Electronic check", "0-12"),
+        ("CUST0002", 0.05, 19.50, 0, "Female", "Masters", "Single", "two_year", "Mailed check", "48-60"),
+    ]
+    conn = _SeqConn([("public.churn_scores",), rows])
+    monkeypatch.setattr(dashboard_queries, "get_pg_conn", lambda: conn)
+
+    frame = dashboard_queries.load_precomputed_scores("v1")
+
+    assert frame is not None
+    assert len(frame) == 2
+    assert list(frame.columns) == [
+        "customer_id", "churn_probability", "monthlycharges", "churn",
+        "gender", "education", "marital_status", "contract", "payment_method", "tenure_bucket",
+    ]
+    assert frame["churn_probability"].dtype == np.float32
+    assert frame["churn"].dtype == np.int8
+    for c in dashboard_queries.CHURN_CATEGORICAL:
+        assert str(frame[c].dtype) == "category"
+
+
+def test_get_scored_customers_uses_precomputed_path_when_enabled(monkeypatch):
+    dashboard_queries.clear_scored_cache()
+    monkeypatch.setattr(dashboard_queries, "_USE_PRECOMPUTED_SCORES", True)
+    precomputed = pd.DataFrame({"customer_id": ["CUST0001"], "churn_probability": [0.9]})
+    monkeypatch.setattr(dashboard_queries, "load_precomputed_scores", lambda v: precomputed)
+    monkeypatch.setattr(
+        dashboard_queries, "score_all_customers",
+        lambda *a, **kw: (_ for _ in ()).throw(AssertionError("must not live-score")),
+    )
+
+    result = dashboard_queries.get_scored_customers(object(), "v1")
+
+    assert result is precomputed
+    dashboard_queries.clear_scored_cache()
+
+
+def test_get_scored_customers_falls_back_to_live_scoring_when_precomputed_missing(monkeypatch):
+    dashboard_queries.clear_scored_cache()
+    monkeypatch.setattr(dashboard_queries, "_USE_PRECOMPUTED_SCORES", True)
+    monkeypatch.setattr(dashboard_queries, "load_precomputed_scores", lambda v: None)
+    live = pd.DataFrame({"customer_id": ["CUST0001"], "churn_probability": [0.1]})
+    monkeypatch.setattr(dashboard_queries, "score_all_customers", lambda *a, **kw: live)
+
+    result = dashboard_queries.get_scored_customers(object(), "v1")
+
+    assert result is live
+    dashboard_queries.clear_scored_cache()
+
+
+def test_get_scored_customers_skips_precomputed_lookup_when_disabled(monkeypatch):
+    dashboard_queries.clear_scored_cache()
+    monkeypatch.setattr(dashboard_queries, "_USE_PRECOMPUTED_SCORES", False)
+    monkeypatch.setattr(
+        dashboard_queries, "load_precomputed_scores",
+        lambda v: (_ for _ in ()).throw(AssertionError("must not consult precomputed table")),
+    )
+    live = pd.DataFrame({"customer_id": ["CUST0001"], "churn_probability": [0.1]})
+    monkeypatch.setattr(dashboard_queries, "score_all_customers", lambda *a, **kw: live)
+
+    result = dashboard_queries.get_scored_customers(object(), "v1")
+
+    assert result is live
+    dashboard_queries.clear_scored_cache()
 
 
 def test_load_latest_drift_returns_empty_frame_when_table_missing(monkeypatch):

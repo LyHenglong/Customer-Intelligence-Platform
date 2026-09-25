@@ -175,6 +175,34 @@ CREATE TABLE IF NOT EXISTS public.rag_chunks (
 
 CREATE INDEX IF NOT EXISTS idx_rag_chunks_document_id ON public.rag_chunks (document_id);
 
+-- Precomputed churn scores, one row per customer per currently-served
+-- model version. Written out-of-band by scripts/precompute_churn_scores.py
+-- (re-run after every retrain that promotes a new champion), read by
+-- src/model/dashboard_queries.load_precomputed_scores() when
+-- USE_PRECOMPUTED_SCORES=true (see render.yaml) - the fast path for a
+-- memory-constrained deployment that can't afford to run the ~1M-row
+-- in-process scoring pass (score_all_customers) on every cache miss.
+-- Local/Docker usage is unaffected: that env var defaults to false, so
+-- this table stays empty and unused unless someone opts in. Also created
+-- on demand by ensure_churn_scores_table() so the module works against a
+-- warehouse that predates this file.
+CREATE TABLE IF NOT EXISTS public.churn_scores (
+    customer_id         TEXT PRIMARY KEY,
+    model_version       TEXT NOT NULL,
+    churn_probability   DOUBLE PRECISION NOT NULL,
+    monthlycharges      NUMERIC(10, 2),
+    churn               INTEGER,
+    gender              TEXT,
+    education           TEXT,
+    marital_status      TEXT,
+    contract            TEXT,
+    payment_method      TEXT,
+    tenure_bucket       TEXT,
+    computed_at         TIMESTAMP NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_churn_scores_model_version ON public.churn_scores (model_version);
+
 -- One row per AI assistant request (src/ai/graph.py's run_query, written
 -- by src/ai/observability/tracing.py). Deliberately excludes the
 -- generated answer text and full evidence values - routing/timing/

@@ -84,6 +84,27 @@ services:
       # acceptable trade on a memory tier this tight.
       - key: WARM_MODELS_ON_STARTUP
         value: "false"
+      # Turning off eager warming (above) stopped the crash loop at
+      # startup, but requests that actually trigger the ~1M-row
+      # in-process scoring pass (/overview/stats, /at-risk, /overview
+      # /revenue-at-risk-by-segment) were still confirmed OOM-killing this
+      # free-tier container on their own - same underlying cost, just
+      # moved from startup to first real request. Fixing that by paying
+      # for a bigger plan was ruled out; sampling/estimating the numbers
+      # was ruled out too (this project's numbers are exact everywhere
+      # else). Instead, the scoring pass runs out-of-band, once, on a
+      # machine with enough memory (scripts/precompute_churn_scores.py,
+      # run locally against this same Neon database - see that script's
+      # docstring, re-run after every retrain), and this flag switches
+      # src/model/dashboard_queries.get_scored_customers to read the
+      # result back with a plain SELECT instead of recomputing it here.
+      # Numbers stay exact; this service now only has to hold ~45MB of
+      # already-scored rows in memory, not run sklearn inference over
+      # the whole warehouse. Defaults to false (score_all_customers
+      # runs in-process, unchanged) everywhere this isn't explicitly set
+      # - local/Docker usage is unaffected.
+      - key: USE_PRECOMPUTED_SCORES
+        value: "true"
 
   - type: web
     name: telecom-churn-frontend
