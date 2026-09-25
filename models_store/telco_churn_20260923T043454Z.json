@@ -1,0 +1,28 @@
+{
+  "version": "20260923T043454Z",
+  "dataset": "blastchar/telco-customer-churn",
+  "purpose": "real-data signal benchmark; not served - see module docstring",
+  "trained_at": "2026-09-23T04:34:54.443661+00:00",
+  "training_rows": 4930,
+  "total_rows": 7043,
+  "cv_roc_auc_mean": 0.8346898046739891,
+  "cv_roc_auc_std": 0.011545796929003687,
+  "roc_auc": 0.8268826371128162,
+  "precision_churn": 0.598404255319149,
+  "recall_churn": 0.6016042780748663,
+  "f1_churn": 0.6000000000000001,
+  "threshold": 0.43281323882773265,
+  "brier_calibrated": 0.14118230381305044,
+  "brier_uncalibrated": 0.1613565782117062,
+  "brier_always_base_rate": 0.19497996988174027,
+  "confusion_matrix": [
+    [
+      884,
+      151
+    ],
+    [
+      149,
+      225
+    ]
+  ]
+}

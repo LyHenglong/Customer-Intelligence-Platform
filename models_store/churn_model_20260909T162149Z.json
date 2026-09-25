@@ -1,0 +1,37 @@
+{
+  "version": "20260909T162149Z",
+  "trained_at": "2026-09-09T16:21:50.006198+00:00",
+  "model_type": "LightGBM",
+  "threshold": 0.4665914899269824,
+  "threshold_rationale": "highest threshold that still guarantees recall >= 0.6 on the test set - maximizes precision subject to that recall floor (retention use case: catching churners is worth some false positives)",
+  "n_rows_total": 150000,
+  "n_rows_train": 120000,
+  "n_rows_test": 30000,
+  "class_counts": {
+    "0": 135319,
+    "1": 14681
+  },
+  "class_pct": {
+    "0": 90.21,
+    "1": 9.79
+  },
+  "precision_churn": 0.15572249226690235,
+  "recall_churn": 0.6001362397820164,
+  "f1_churn": 0.24728089256894253,
+  "precision_retained": 0.9371688520203372,
+  "recall_retained": 0.6470218740762637,
+  "f1_retained": 0.7655249295066558,
+  "accuracy": 0.6424333333333333,
+  "roc_auc": 0.669958171608161,
+  "confusion_matrix": [
+    [
+      17511,
+      9553
+    ],
+    [
+      1174,
+      1762
+    ]
+  ],
+  "model_file": "churn_model_20260909T162149Z.joblib"
+}
