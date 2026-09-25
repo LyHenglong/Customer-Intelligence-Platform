@@ -202,8 +202,27 @@ def _warm_all() -> None:
     _warm_scored_cache()
 
 
+# Escape hatch for memory-constrained deployments. The embedder + reranker
+# alone are ~300-500MB of PyTorch/transformers, on top of whatever the
+# population-scoring pass needs - fine on a 3GB local container, but a real,
+# reproduced crash loop on Render's free-tier web service memory ceiling:
+# the process was getting silently OOM-killed a few minutes into every
+# single boot, right after the RAG models finished loading, restarting into
+# the same trap forever (confirmed via Render's logs - no error, no
+# traceback, just "Application startup complete" then a fresh "Started
+# server process" a few minutes later, the exact signature of a SIGKILL the
+# app never got to log). A service that never finishes booting is strictly
+# worse than one that pays a cold-load cost on its first real request per
+# model, so this defaults ON (unchanged local/Docker behavior) and is
+# turned OFF specifically for the Render deployment - see render.yaml.
+_WARM_MODELS_ON_STARTUP = os.environ.get("WARM_MODELS_ON_STARTUP", "true").lower() not in ("false", "0", "")
+
+
 @app.on_event("startup")
 def start_cache_warm() -> None:
+    if not _WARM_MODELS_ON_STARTUP:
+        log.info("WARM_MODELS_ON_STARTUP=false: skipping eager warm, everything lazy-loads on first request")
+        return
     threading.Thread(target=_warm_all, name="startup-warm", daemon=True).start()
 
 

@@ -70,6 +70,20 @@ services:
       # frontend service exists.
       - key: CORS_ALLOWED_ORIGINS
         sync: false
+      # Eager startup warming (src/model/api.py's _warm_all) is fine on a
+      # 3GB local Docker container but caused a real, confirmed OOM crash
+      # loop on Render's free-tier memory ceiling - the RAG embedder +
+      # reranker alone are ~300-500MB of PyTorch/transformers, loaded
+      # within seconds of boot. The process never finished starting; it
+      # was silently SIGKILLed a few minutes into every attempt and
+      # restarted into the same trap. Turned off here specifically -
+      # local/Docker keeps the eager warm (docker-compose.yml sets
+      # nothing, so the code's own default of "true" applies there).
+      # Trades the original problem (a slow first RAG/at-risk request)
+      # for a service that reliably stays up, which is the only
+      # acceptable trade on a memory tier this tight.
+      - key: WARM_MODELS_ON_STARTUP
+        value: "false"
 
   - type: web
     name: telecom-churn-frontend
