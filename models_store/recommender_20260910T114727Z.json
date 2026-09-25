@@ -1,0 +1,17 @@
+{
+  "version": "20260910T114727Z",
+  "trained_at": "2026-09-10T11:47:28.157693+00:00",
+  "n_customers": 150000,
+  "n_neighbors": 21,
+  "service_columns": [
+    "has_phone_service",
+    "has_internet_service",
+    "has_online_security",
+    "has_online_backup",
+    "has_device_protection",
+    "has_tech_support",
+    "has_streaming_tv",
+    "has_streaming_movies"
+  ],
+  "artifact_file": "recommender_20260910T114727Z.joblib"
+}

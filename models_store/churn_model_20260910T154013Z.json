@@ -1,0 +1,46 @@
+{
+  "version": "20260910T154013Z",
+  "trained_at": "2026-09-10T15:40:13.116803+00:00",
+  "model_type": "LightGBM + sigmoid calibration",
+  "calibrated": true,
+  "calibration_method": "sigmoid",
+  "threshold": 0.10244747134830112,
+  "threshold_rationale": "highest threshold that still guarantees recall >= 0.6 on the test set - maximizes precision subject to that recall floor (retention use case: catching churners is worth some false positives). Applied to CALIBRATED probabilities, so it sits near the base rate rather than near 0.5",
+  "brier_score": 0.08617506836240457,
+  "brier_score_uncalibrated": 0.1952918023220928,
+  "brier_score_always_base_rate": 0.08892627610129193,
+  "mean_predicted_probability": 0.09875675574725332,
+  "mean_predicted_probability_uncalibrated": 0.4046608618567883,
+  "actual_churn_rate_test": 0.09866008932737817,
+  "n_rows_total": 150000,
+  "n_rows_train": 105000,
+  "n_rows_calibration": 14998,
+  "n_rows_test": 30002,
+  "class_counts": {
+    "0": 135204,
+    "1": 14796
+  },
+  "class_pct": {
+    "0": 90.14,
+    "1": 9.86
+  },
+  "precision_churn": 0.15082802547770702,
+  "recall_churn": 0.6,
+  "f1_churn": 0.24105870376654226,
+  "precision_retained": 0.9350414220661656,
+  "recall_retained": 0.6302418460173064,
+  "f1_retained": 0.7529656056020676,
+  "accuracy": 0.6272581827878142,
+  "roc_auc": 0.6564002792452981,
+  "confusion_matrix": [
+    [
+      17043,
+      9999
+    ],
+    [
+      1184,
+      1776
+    ]
+  ],
+  "model_file": "churn_model_20260910T154013Z.joblib"
+}

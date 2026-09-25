@@ -13,10 +13,29 @@ data/processed/
 *.duckdb
 *.duckdb.wal
 
-# Model artifacts (versioned separately, not in git)
+# Model artifacts - blanket-ignored (training is meant to be re-run, not
+# diffed), with two deliberate exceptions below.
+#
+# docker/Dockerfile.api does `COPY models_store /app/models_store` and the
+# registry resolves whatever is newest on disk when MLflow has no
+# champion alias (src/model/registry.py's documented fallback). A
+# platform deploy (Render, or anyone else cloning this repo) builds from
+# a fresh checkout with no local models_store/ at all - every prediction
+# endpoint would 503 with "no churn model artifact found" on a perfectly
+# healthy container. That is worse than a bloated repo, so the two
+# artifacts actually served locally are committed rather than gitignored.
+# Update these two lines (and re-run `git add -f`) after promoting a new
+# champion, the same way you would update any other deployment config.
 models_store/*.pkl
 models_store/*.joblib
-models_store/*.json
+!models_store/churn_model_20260923T054451Z.joblib
+!models_store/recommender_20260921T040152Z.joblib
+# Metadata is cheap (a few KB of JSON each) and every version's entry
+# feeds the Model Performance page's "performance across retrains" trend
+# chart, so all of it is committed rather than just the two versions
+# above - a deploy with only one data point on that chart would look
+# broken, not minimal.
+!models_store/*.json
 !models_store/.gitkeep
 
 # MLflow artifact store (docker-compose's mlflow service bind mount) -
