@@ -106,6 +106,32 @@ def test_overview_stats_combines_the_expected_sources(monkeypatch, fake_churn_st
     assert body["top_feature_importances"][0]["feature"] == "contract"  # sorted descending
 
 
+def test_warm_models_on_startup_defaults_true(monkeypatch):
+    """Unset means the eager warm runs - the behavior local/Docker relies
+    on. Only a deployment that explicitly opts out (render.yaml's
+    WARM_MODELS_ON_STARTUP=false, added after a real OOM crash loop on
+    Render's free tier) should get the lazy-everything fallback."""
+    monkeypatch.delenv("WARM_MODELS_ON_STARTUP", raising=False)
+    reloaded = importlib.reload(api_module)
+    try:
+        assert reloaded._WARM_MODELS_ON_STARTUP is True
+    finally:
+        importlib.reload(api_module)
+
+
+def test_warm_models_on_startup_false_skips_the_eager_warm(monkeypatch):
+    monkeypatch.setenv("WARM_MODELS_ON_STARTUP", "false")
+    reloaded = importlib.reload(api_module)
+    warm_started = []
+    try:
+        monkeypatch.setattr(reloaded.threading, "Thread", lambda **kw: warm_started.append(kw) or type("T", (), {"start": lambda self: None})())
+        reloaded.start_cache_warm()
+        assert warm_started == []  # no thread was ever created
+    finally:
+        monkeypatch.delenv("WARM_MODELS_ON_STARTUP", raising=False)
+        importlib.reload(api_module)
+
+
 def test_cache_warm_populates_the_scored_cache(monkeypatch, fake_churn_state):
     """The warm exists so the first visitor doesn't pay a ~35-110s
     full-population scoring pass (which also saturates the single uvicorn
