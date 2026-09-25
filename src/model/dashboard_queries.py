@@ -137,9 +137,157 @@ def get_scored_customers(churn_artifact, churn_version: str) -> pd.DataFrame:
         cached = _scored_cache
         if cached["data"] is not None and cached["version"] == churn_version and now < cached["expires_at"]:
             return cached["data"]
-        frame = score_all_customers(churn_artifact, churn_version)
+        frame = None
+        if _USE_PRECOMPUTED_SCORES:
+            frame = load_precomputed_scores(churn_version)
+            if frame is None:
+                log.warning(
+                    "USE_PRECOMPUTED_SCORES=true but public.churn_scores has no rows for "
+                    "version %s - falling back to live scoring (run "
+                    "scripts/precompute_churn_scores.py against this warehouse)",
+                    churn_version,
+                )
+        if frame is None:
+            frame = score_all_customers(churn_artifact, churn_version)
         _scored_cache.update(data=frame, expires_at=now + _SCORED_CACHE_TTL_SECONDS, version=churn_version)
         return frame
+
+
+def ensure_churn_scores_table() -> None:
+    """Creates public.churn_scores if the warehouse predates it - same
+    on-demand pattern as src/agents/cache.py's ensure_tables()."""
+    conn = get_pg_conn()
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                CREATE TABLE IF NOT EXISTS public.churn_scores (
+                    customer_id         TEXT PRIMARY KEY,
+                    model_version       TEXT NOT NULL,
+                    churn_probability   DOUBLE PRECISION NOT NULL,
+                    monthlycharges      NUMERIC(10, 2),
+                    churn               INTEGER,
+                    gender              TEXT,
+                    education           TEXT,
+                    marital_status      TEXT,
+                    contract            TEXT,
+                    payment_method      TEXT,
+                    tenure_bucket       TEXT,
+                    computed_at         TIMESTAMP NOT NULL DEFAULT now()
+                );
+                """
+            )
+            cur.execute(
+                "CREATE INDEX IF NOT EXISTS idx_churn_scores_model_version "
+                "ON public.churn_scores (model_version)"
+            )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def store_scored_customers(frame: pd.DataFrame, churn_version: str) -> None:
+    """Persists score_all_customers()'s output to public.churn_scores, so
+    a memory-constrained deployment (see load_precomputed_scores) can
+    serve it from a cheap SQL SELECT instead of re-running the ~1M-row
+    scoring pass in-process on every cache miss.
+
+    Meant to be run out-of-band (scripts/precompute_churn_scores.py, by
+    hand or after a retrain) against whichever warehouse the deployment
+    actually serves from - never called from a request path. Old rows
+    for a different model_version are deleted first so the table never
+    silently mixes two models' scores together.
+    """
+    from psycopg2.extras import execute_values
+
+    ensure_churn_scores_table()
+    conn = get_pg_conn()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("DELETE FROM public.churn_scores WHERE model_version != %s", (churn_version,))
+            rows = [
+                (
+                    r.customer_id, churn_version, float(r.churn_probability), float(r.monthlycharges),
+                    int(r.churn), r.gender, r.education, r.marital_status, r.contract,
+                    r.payment_method, r.tenure_bucket,
+                )
+                for r in frame.itertuples(index=False)
+            ]
+            execute_values(
+                cur,
+                """
+                INSERT INTO public.churn_scores
+                    (customer_id, model_version, churn_probability, monthlycharges, churn,
+                     gender, education, marital_status, contract, payment_method, tenure_bucket)
+                VALUES %s
+                ON CONFLICT (customer_id) DO UPDATE SET
+                    model_version = EXCLUDED.model_version,
+                    churn_probability = EXCLUDED.churn_probability,
+                    monthlycharges = EXCLUDED.monthlycharges,
+                    churn = EXCLUDED.churn,
+                    gender = EXCLUDED.gender,
+                    education = EXCLUDED.education,
+                    marital_status = EXCLUDED.marital_status,
+                    contract = EXCLUDED.contract,
+                    payment_method = EXCLUDED.payment_method,
+                    tenure_bucket = EXCLUDED.tenure_bucket,
+                    computed_at = now()
+                """,
+                rows,
+                page_size=5000,
+            )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def load_precomputed_scores(churn_version: str) -> pd.DataFrame | None:
+    """The public.churn_scores fast path for get_scored_customers.
+
+    Returns None - never raises - whenever the precomputed path can't
+    serve the request: the table doesn't exist yet, or holds no rows for
+    this exact model_version (e.g. right after a retrain, before the next
+    precompute run). Callers fall back to score_all_customers() in both
+    cases, same as any other cache miss.
+    """
+    conn = get_pg_conn()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("SELECT to_regclass('public.churn_scores')")
+            if cur.fetchone()[0] is None:
+                return None
+            cur.execute(
+                "SELECT customer_id, churn_probability, monthlycharges, churn, "
+                "gender, education, marital_status, contract, payment_method, tenure_bucket "
+                "FROM public.churn_scores WHERE model_version = %s",
+                (churn_version,),
+            )
+            rows = cur.fetchall()
+    finally:
+        conn.close()
+
+    if not rows:
+        return None
+
+    frame = pd.DataFrame(rows, columns=[
+        "customer_id", "churn_probability", "monthlycharges", "churn",
+        "gender", "education", "marital_status", "contract", "payment_method", "tenure_bucket",
+    ])
+    frame["churn_probability"] = frame["churn_probability"].astype(np.float32)
+    frame["monthlycharges"] = frame["monthlycharges"].astype(np.float32)
+    frame["churn"] = frame["churn"].astype(np.int8)
+    for c in CHURN_CATEGORICAL:
+        frame[c] = pd.Categorical(frame[c])
+    return frame
+
+
+# Memory-constrained deployments (Render's free tier) opt into reading
+# get_scored_customers from the public.churn_scores precomputed table
+# instead of running the in-process scoring pass - see render.yaml and
+# load_precomputed_scores' docstring. Defaults to false, so local/Docker
+# usage (and any deployment with enough memory to just run the real thing)
+# is completely unaffected.
+_USE_PRECOMPUTED_SCORES = os.environ.get("USE_PRECOMPUTED_SCORES", "false").lower() not in ("false", "0", "")
 
 
 def peek_scored_customers(churn_version: str) -> pd.DataFrame | None:

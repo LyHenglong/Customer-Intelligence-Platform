@@ -449,12 +449,20 @@ Both the API and the frontend can run reachable from anywhere — [Neon](https:/
 5. **Fill in `telecom-churn-api`'s env vars** Render prompts for (`POSTGRES_HOST/DB/USER/PASSWORD`) with the same Neon project from step 1. `GROQ_API_KEY` is optional — leave it out unless you want a public visitor able to trigger real (rate-limited, cost-bearing) calls against your own Groq quota; see the [AI Agent Layer](#ai-agent-layer) guardrails section for what stays intact either way (the platform runs completely normally without it, just without the AI prose). Leave `CORS_ALLOWED_ORIGINS` and `telecom-churn-frontend`'s `NEXT_PUBLIC_API_URL` on their placeholder for now — neither service's real URL exists yet.
 6. **Copy each deployed service's URL** (Render shows these after the first successful deploy — something like `https://telecom-churn-api.onrender.com` and `https://telecom-churn-frontend.onrender.com`).
 7. **Set `CORS_ALLOWED_ORIGINS`** on `telecom-churn-api` to the frontend's URL, and **`NEXT_PUBLIC_API_URL`** on `telecom-churn-frontend` to the API's URL, then **manually redeploy `telecom-churn-frontend` specifically** — `NEXT_PUBLIC_API_URL` is inlined into the browser bundle at build time (see `docker/Dockerfile.frontend`'s comment), so an env var update alone doesn't take effect until the next build.
+8. **Precompute churn scores against the same Neon database**, so the free-tier API doesn't have to score all 1,000,000 customers in-process on every request:
+   ```bash
+   POSTGRES_HOST=<neon-host> POSTGRES_DB=<neon-db> POSTGRES_USER=<neon-user> \
+   POSTGRES_PASSWORD=<neon-password> POSTGRES_SSLMODE=require \
+   python -m scripts.precompute_churn_scores
+   ```
+   `render.yaml` already sets `USE_PRECOMPUTED_SCORES=true` on `telecom-churn-api`, which makes `/overview/stats`, `/at-risk`, and `/overview/revenue-at-risk-by-segment` read this table with a plain `SELECT` instead of running the scoring pass themselves — see `WARM_MODELS_ON_STARTUP`'s neighboring comment in `render.yaml` for the OOM crash loop this fixes. Re-run this step after every retrain that promotes a new champion model; until it's re-run for a new version, those endpoints transparently fall back to live in-process scoring for that version (slow but correct, same as before this existed).
 
 `src/warehouse.py`'s `get_pg_conn()` connects with `sslmode="prefer"` (configurable via `POSTGRES_SSLMODE`), so the identical code reaches both the local Docker Postgres (no SSL) and Neon (SSL required) without an environment-specific branch — see Deviations for the real bugs this deployment path surfaced along the way.
 
 Two things worth knowing before relying on this:
 - **Free-tier cold starts**: Render's free web services spin down after ~15 minutes idle; the first request after that pays a 10-50s cold-start delay to spin back up. Expected behavior on the free plan, not a bug — a visitor's first request after a quiet period will just be slow, not broken.
 - **No MLflow alongside the API**: this deployment has no `mlflow` service reachable from it, so `src/model/registry.py` falls back to the glob-latest-by-timestamp artifact already baked into the Docker image at build time — correct, and by design (see that module's own docstring), but it does mean this deployment always serves whatever was newest in `models_store/` at the image's last build, not a live-promoted model.
+- **Free-tier memory ceiling**: real, and confirmed by an actual OOM crash loop, not a theoretical concern. Render's free-tier web service memory ceiling is well below what the local 3GB Docker container budgets for the RAG models plus a full in-process pass scoring all 1,000,000 customers. `WARM_MODELS_ON_STARTUP=false` and `USE_PRECOMPUTED_SCORES=true` (step 8 above) together fix this without paying for a bigger plan and without sampling/estimating any number the dashboard shows — see both env vars' comments in `render.yaml` for the full story.
 
 ### dbt directly
 
@@ -479,7 +487,7 @@ pytest tests/ -v
 | `test_model.py` | 13 | expected-value math, threshold selection, recommender invariants |
 | `test_drift.py` | 18 | PSI correctness, and the shifts the detector is required to catch |
 | `test_evaluate_recommender.py` | 20 | ranking metrics, leave-one-out splitting, bootstrap/McNemar significance tests |
-| `test_dashboard_queries.py` | 9 | `column_importances`/SHAP behave correctly on both a raw pipeline and a `CalibratedClassifierCV` wrapper, plus the rest of the dashboard-facing warehouse reads |
+| `test_dashboard_queries.py` | 18 | `column_importances`/SHAP behave correctly on both a raw pipeline and a `CalibratedClassifierCV` wrapper, the precomputed-scores fast path (`load_precomputed_scores`/`get_scored_customers` fallback), plus the rest of the dashboard-facing warehouse reads |
 | `test_agents.py` | 28 | AI Agent Layer: prompt grounding in real SHAP/metrics data, retry/backoff on rate limits, graceful fallback on failure (Groq fully mocked) |
 
 ## Production hardening
