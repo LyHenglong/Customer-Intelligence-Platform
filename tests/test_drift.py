@@ -54,7 +54,7 @@ def test_same_distribution_different_samples_stays_stable():
 
 def test_mean_shift_is_detected():
     a = pd.Series(RNG.normal(50, 10, 20_000))
-    b = pd.Series(RNG.normal(70, 10, 20_000))   # +2 standard deviations
+    b = pd.Series(RNG.normal(70, 10, 20_000))  # +2 standard deviations
     assert numeric_psi(a, b) >= SIGNIFICANT_THRESHOLD
 
 
@@ -67,10 +67,7 @@ def test_variance_shift_is_detected():
 
 def test_psi_grows_monotonically_with_shift_size():
     base = pd.Series(RNG.normal(50, 10, 20_000))
-    scores = [
-        numeric_psi(base, pd.Series(RNG.normal(50 + delta, 10, 20_000)))
-        for delta in (0, 2, 5, 10, 20)
-    ]
+    scores = [numeric_psi(base, pd.Series(RNG.normal(50 + delta, 10, 20_000))) for delta in (0, 2, 5, 10, 20)]
     assert scores == sorted(scores)
 
 
@@ -78,14 +75,14 @@ def test_missingness_shift_is_detected():
     """The NULL bucket is the point: values that stop arriving are drift."""
     a = pd.Series(RNG.normal(50, 10, 20_000))
     b = a.copy()
-    b.iloc[:8_000] = np.nan          # 0% -> 40% missing
+    b.iloc[:8_000] = np.nan  # 0% -> 40% missing
     assert numeric_psi(a, b) >= SIGNIFICANT_THRESHOLD
 
 
 def test_out_of_range_values_are_not_silently_dropped():
     """Values beyond the reference range must land in the open end bins."""
     a = pd.Series(RNG.uniform(0, 100, 20_000))
-    b = pd.Series(RNG.uniform(200, 300, 20_000))   # entirely outside a
+    b = pd.Series(RNG.uniform(200, 300, 20_000))  # entirely outside a
     assert numeric_psi(a, b) >= SIGNIFICANT_THRESHOLD
 
 
@@ -138,16 +135,14 @@ def _frame(n, income_mean=60_000, contract_weights=(0.5, 0.3, 0.2)):
         {
             "age": RNG.normal(45, 12, n),
             "annual_income": RNG.normal(income_mean, 15_000, n),
-            "contract": RNG.choice(
-                ["month_to_month", "one_year", "two_year"], n, p=list(contract_weights)
-            ),
+            "contract": RNG.choice(["month_to_month", "one_year", "two_year"], n, p=list(contract_weights)),
         }
     )
 
 
 def test_compute_drift_flags_only_the_drifted_feature():
     reference = _frame(20_000)
-    current = _frame(20_000, income_mean=95_000)     # income moved, age did not
+    current = _frame(20_000, income_mean=95_000)  # income moved, age did not
 
     result = compute_drift(
         reference,

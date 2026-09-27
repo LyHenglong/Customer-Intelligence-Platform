@@ -74,13 +74,15 @@ def _scored_df():
     including the `category`-dtype segment columns that ride along with the
     scores so /overview/revenue-at-risk-by-segment can group the whole
     at-risk population without a per-row Postgres fetch."""
-    return pd.DataFrame({
-        "customer_id": ["CUST0001", "CUST0002", "CUST0003"],
-        "churn_probability": [0.9, 0.5, 0.1],
-        "monthlycharges": [80.0, 60.0, 40.0],
-        "contract": pd.Categorical(["month-to-month", "month-to-month", "two_year"]),
-        "tenure_bucket": pd.Categorical(["new_0_6mo", "loyal_24mo_plus", "loyal_24mo_plus"]),
-    })
+    return pd.DataFrame(
+        {
+            "customer_id": ["CUST0001", "CUST0002", "CUST0003"],
+            "churn_probability": [0.9, 0.5, 0.1],
+            "monthlycharges": [80.0, 60.0, 40.0],
+            "contract": pd.Categorical(["month-to-month", "month-to-month", "two_year"]),
+            "tenure_bucket": pd.Categorical(["new_0_6mo", "loyal_24mo_plus", "loyal_24mo_plus"]),
+        }
+    )
 
 
 # --------------------------------------------------------------- overview
@@ -92,8 +94,7 @@ def test_overview_stats_combines_the_expected_sources(monkeypatch, fake_churn_st
     # Carries a version now: model_auc is looked up by the serving version
     # rather than taken from the newest file, so unversioned metadata
     # correctly matches nothing.
-    monkeypatch.setattr(dashboard_queries, "load_all_churn_metadata",
-                        lambda: [{"version": "TESTV1", "roc_auc": 0.65}])
+    monkeypatch.setattr(dashboard_queries, "load_all_churn_metadata", lambda: [{"version": "TESTV1", "roc_auc": 0.65}])
     monkeypatch.setattr(dashboard_queries, "column_importances", lambda pipeline: {"tenure": 0.4, "contract": 0.6})
 
     with TestClient(app_module.app) as client:
@@ -127,7 +128,11 @@ def test_warm_models_on_startup_false_skips_the_eager_warm(monkeypatch):
     reloaded = importlib.reload(app_module)
     warm_started = []
     try:
-        monkeypatch.setattr(reloaded.threading, "Thread", lambda **kw: warm_started.append(kw) or type("T", (), {"start": lambda self: None})())
+        monkeypatch.setattr(
+            reloaded.threading,
+            "Thread",
+            lambda **kw: warm_started.append(kw) or type("T", (), {"start": lambda self: None})(),
+        )
         reloaded.start_cache_warm()
         assert warm_started == []  # no thread was ever created
     finally:
@@ -161,6 +166,7 @@ def test_cache_warm_failure_never_propagates(monkeypatch, fake_churn_state):
     """It is an optimisation - if it fails the request path just pays the
     cost itself, exactly as before. A raising warm thread must not be able
     to take the API down with it."""
+
     def _boom(*a, **kw):
         raise RuntimeError("warehouse unreachable")
 
@@ -196,7 +202,9 @@ def test_overview_segment_rates_rejects_bad_column(monkeypatch):
 
 
 def test_overview_segment_rates_returns_buckets(monkeypatch):
-    df = pd.DataFrame({"contract": ["month-to-month", "two_year"], "churn_rate": [0.4, 0.05], "n_customers": [500, 300]})
+    df = pd.DataFrame(
+        {"contract": ["month-to-month", "two_year"], "churn_rate": [0.4, 0.05], "n_customers": [500, 300]}
+    )
     monkeypatch.setattr(dashboard_queries, "load_segment_rates", lambda column: df)
 
     with TestClient(app_module.app) as client:
@@ -252,7 +260,8 @@ def test_revenue_at_risk_by_segment_supports_other_segment_columns(monkeypatch, 
     body = response.json()
     assert body["segment_column"] == "tenure_bucket"
     assert {b["segment"]: b["revenue_at_risk"] for b in body["buckets"]} == {
-        "new_0_6mo": 80.0, "loyal_24mo_plus": 60.0,
+        "new_0_6mo": 80.0,
+        "loyal_24mo_plus": 60.0,
     }
 
 
@@ -281,10 +290,15 @@ def test_at_risk_clamps_max_rows_server_side(monkeypatch, fake_churn_state):
 def test_at_risk_returns_customers_sorted_by_probability(monkeypatch, fake_churn_state):
     monkeypatch.setattr(dashboard_queries, "score_all_customers", lambda *a, **kw: _scored_df())
     monkeypatch.setattr(
-        dashboard_queries, "load_customers_by_id",
+        dashboard_queries,
+        "load_customers_by_id",
         lambda ids: pd.DataFrame({"customer_id": list(ids), "contract": ["month-to-month"] * len(ids)}),
     )
-    monkeypatch.setattr(dashboard_router, "compute_shap_details", lambda pipeline, X, top_k: [[{"feature": "tenure", "shap_value": 0.1, "direction": "increases risk"}]])
+    monkeypatch.setattr(
+        dashboard_router,
+        "compute_shap_details",
+        lambda pipeline, X, top_k: [[{"feature": "tenure", "shap_value": 0.1, "direction": "increases risk"}]],
+    )
     monkeypatch.setitem(api_state.models, "recommender", None)  # skip recommendation path
 
     with TestClient(app_module.app) as client:
@@ -301,9 +315,16 @@ def test_at_risk_returns_customers_sorted_by_probability(monkeypatch, fake_churn
 
 
 def test_outreach_draft_soft_fails_when_no_recommendation(monkeypatch, fake_churn_state):
-    monkeypatch.setattr(models_router, "_get_explanation", lambda customer_id: {
-        "churn_probability": 0.8, "risk_factors": [], "explanation": "at risk", "source": "llm",
-    })
+    monkeypatch.setattr(
+        models_router,
+        "_get_explanation",
+        lambda customer_id: {
+            "churn_probability": 0.8,
+            "risk_factors": [],
+            "explanation": "at risk",
+            "source": "llm",
+        },
+    )
     monkeypatch.setitem(api_state.models, "recommender", object())
     monkeypatch.setattr(models_router, "_recommend_with_fallback", lambda customer_id, top_n=1: [])
 
@@ -327,12 +348,27 @@ def test_outreach_draft_404s_when_customer_not_found(monkeypatch, fake_churn_sta
 
 
 def test_outreach_draft_generates_when_a_service_is_recommended(monkeypatch, fake_churn_state):
-    monkeypatch.setattr(models_router, "_get_explanation", lambda customer_id: {
-        "churn_probability": 0.8, "risk_factors": [], "explanation": "at risk", "source": "llm",
-    })
+    monkeypatch.setattr(
+        models_router,
+        "_get_explanation",
+        lambda customer_id: {
+            "churn_probability": 0.8,
+            "risk_factors": [],
+            "explanation": "at risk",
+            "source": "llm",
+        },
+    )
     monkeypatch.setitem(api_state.models, "recommender", object())
-    monkeypatch.setattr(models_router, "_recommend_with_fallback", lambda customer_id, top_n=1: [{"service": "has_tech_support", "score": 0.9}])
-    monkeypatch.setattr(models_router, "get_or_generate", lambda customer_id, agent_type, version, generate_fn: "We'd love to offer you tech support.")
+    monkeypatch.setattr(
+        models_router,
+        "_recommend_with_fallback",
+        lambda customer_id, top_n=1: [{"service": "has_tech_support", "score": 0.9}],
+    )
+    monkeypatch.setattr(
+        models_router,
+        "get_or_generate",
+        lambda customer_id, agent_type, version, generate_fn: "We'd love to offer you tech support.",
+    )
 
     with TestClient(app_module.app) as client:
         response = client.post("/outreach-draft/CUST0001")
@@ -348,7 +384,9 @@ def test_outreach_draft_generates_when_a_service_is_recommended(monkeypatch, fak
 
 
 def test_search_customers_wraps_customer_search(monkeypatch):
-    canned = CustomerSearchResult(customers=[CustomerProfile(customer_id="CUST0001")], total_matched=1, limit=25, offset=0, truncated=False)
+    canned = CustomerSearchResult(
+        customers=[CustomerProfile(customer_id="CUST0001")], total_matched=1, limit=25, offset=0, truncated=False
+    )
     captured = {}
 
     def _fake_search(filters, limit, offset):
@@ -369,7 +407,11 @@ def test_search_customers_wraps_customer_search(monkeypatch):
 
 
 def test_get_customer_returns_200_with_found_false_on_a_miss(monkeypatch):
-    monkeypatch.setattr(dashboard_router, "ai_customer_lookup", lambda customer_id: CustomerLookupResult(customer_id=customer_id, found=False))
+    monkeypatch.setattr(
+        dashboard_router,
+        "ai_customer_lookup",
+        lambda customer_id: CustomerLookupResult(customer_id=customer_id, found=False),
+    )
 
     with TestClient(app_module.app) as client:
         response = client.get("/customers/does-not-exist")
@@ -406,8 +448,9 @@ def test_model_history_reports_the_served_version_not_the_newest(monkeypatch):
     version, or a retrain that saved but failed to register. The frontend
     labelled the last entry "current production model", so it showed a
     non-serving model's threshold and confusion matrix as live."""
-    monkeypatch.setattr(dashboard_queries, "load_all_churn_metadata",
-                        lambda: [{"version": "V1"}, {"version": "V2_NEWEST"}])
+    monkeypatch.setattr(
+        dashboard_queries, "load_all_churn_metadata", lambda: [{"version": "V1"}, {"version": "V2_NEWEST"}]
+    )
 
     with TestClient(app_module.app) as client:
         monkeypatch.setitem(api_state.models, "churn_version", "V1")
@@ -424,10 +467,14 @@ def test_overview_stats_auc_describes_the_served_model(monkeypatch, fake_churn_s
     monkeypatch.setattr(dashboard_queries, "load_overall_stats", lambda: {"total_customers": 3, "churn_rate": 0.1})
     monkeypatch.setattr(dashboard_queries, "score_all_customers", lambda *a, **kw: _scored_df())
     monkeypatch.setattr(dashboard_queries, "column_importances", lambda pipeline: {})
-    monkeypatch.setattr(dashboard_queries, "load_all_churn_metadata", lambda: [
-        {"version": "TESTV1", "roc_auc": 0.61},
-        {"version": "NEWER_BUT_NOT_SERVED", "roc_auc": 0.99},
-    ])
+    monkeypatch.setattr(
+        dashboard_queries,
+        "load_all_churn_metadata",
+        lambda: [
+            {"version": "TESTV1", "roc_auc": 0.61},
+            {"version": "NEWER_BUT_NOT_SERVED", "roc_auc": 0.99},
+        ],
+    )
 
     with TestClient(app_module.app) as client:
         monkeypatch.setitem(api_state.models, "churn_version", "TESTV1")
@@ -443,8 +490,9 @@ def test_overview_stats_auc_is_null_when_served_version_has_no_metadata(monkeypa
     monkeypatch.setattr(dashboard_queries, "load_overall_stats", lambda: {"total_customers": 3, "churn_rate": 0.1})
     monkeypatch.setattr(dashboard_queries, "score_all_customers", lambda *a, **kw: _scored_df())
     monkeypatch.setattr(dashboard_queries, "column_importances", lambda pipeline: {})
-    monkeypatch.setattr(dashboard_queries, "load_all_churn_metadata",
-                        lambda: [{"version": "SOMETHING_ELSE", "roc_auc": 0.99}])
+    monkeypatch.setattr(
+        dashboard_queries, "load_all_churn_metadata", lambda: [{"version": "SOMETHING_ELSE", "roc_auc": 0.99}]
+    )
 
     with TestClient(app_module.app) as client:
         monkeypatch.setitem(api_state.models, "churn_version", "TESTV1")
@@ -454,7 +502,18 @@ def test_overview_stats_auc_is_null_when_served_version_has_no_metadata(monkeypa
 
 
 def test_pipeline_status_combines_all_sources(monkeypatch):
-    monkeypatch.setattr(dashboard_queries, "load_ingestion_log", lambda: pd.DataFrame({"batch_file": ["batch_001.csv"], "rows_loaded": [76924], "loaded_at": ["2026-01-01"], "status": ["success"]}))
+    monkeypatch.setattr(
+        dashboard_queries,
+        "load_ingestion_log",
+        lambda: pd.DataFrame(
+            {
+                "batch_file": ["batch_001.csv"],
+                "rows_loaded": [76924],
+                "loaded_at": ["2026-01-01"],
+                "status": ["success"],
+            }
+        ),
+    )
     monkeypatch.setattr(dashboard_queries, "load_latest_drift", lambda: pd.DataFrame())
     monkeypatch.setattr(dashboard_queries, "load_all_churn_metadata", lambda: [{"version": "V1"}])
     monkeypatch.setattr(dashboard_router, "get_latest_retrain_summary", lambda: {"summary_text": "improved"})

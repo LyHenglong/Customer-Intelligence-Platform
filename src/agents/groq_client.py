@@ -172,7 +172,9 @@ def complete(
             wait = BASE_BACKOFF_SECONDS * (2 ** (attempt - 1))
             log.warning(
                 "groq rate limited (429), backing off %.1fs before attempt %d/%d",
-                wait, attempt + 1, MAX_RETRIES,
+                wait,
+                attempt + 1,
+                MAX_RETRIES,
             )
             if attempt < MAX_RETRIES:
                 time.sleep(wait)
@@ -182,7 +184,10 @@ def complete(
             wait = BASE_BACKOFF_SECONDS * (2 ** (attempt - 1))
             log.warning(
                 "groq transient error (%s), retrying in %.1fs (attempt %d/%d)",
-                type(e).__name__, wait, attempt + 1, MAX_RETRIES,
+                type(e).__name__,
+                wait,
+                attempt + 1,
+                MAX_RETRIES,
             )
             if attempt < MAX_RETRIES:
                 time.sleep(wait)

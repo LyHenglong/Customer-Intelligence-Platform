@@ -46,15 +46,13 @@ def chunk_fixed(text: str, chunk_size_words: int = 150) -> list[RawChunk]:
     words = _words(text)
     chunks = []
     for start in range(0, len(words), chunk_size_words):
-        window = words[start:start + chunk_size_words]
+        window = words[start : start + chunk_size_words]
         if window:
             chunks.append(RawChunk(text=" ".join(window)))
     return chunks
 
 
-def chunk_overlapping(
-    text: str, chunk_size_words: int = 150, overlap_words: int = 40
-) -> list[RawChunk]:
+def chunk_overlapping(text: str, chunk_size_words: int = 150, overlap_words: int = 40) -> list[RawChunk]:
     """Fixed-size windows with overlap, so an idea split across a chunk
     boundary is still fully present in at least one chunk."""
     if overlap_words >= chunk_size_words:
@@ -66,7 +64,7 @@ def chunk_overlapping(
     step = chunk_size_words - overlap_words
     start = 0
     while True:
-        window = words[start:start + chunk_size_words]
+        window = words[start : start + chunk_size_words]
         if not window:
             break
         chunks.append(RawChunk(text=" ".join(window)))
@@ -76,9 +74,7 @@ def chunk_overlapping(
     return chunks
 
 
-def chunk_structure_aware(
-    text: str, max_chunk_size_words: int = 200, overlap_words: int = 30
-) -> list[RawChunk]:
+def chunk_structure_aware(text: str, max_chunk_size_words: int = 200, overlap_words: int = 30) -> list[RawChunk]:
     """Splits on markdown headers first, so each chunk stays within one
     section's context - a section title never gets separated from its own
     content. A section still too long for one chunk is further split with

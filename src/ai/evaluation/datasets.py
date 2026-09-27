@@ -36,12 +36,16 @@ def _sql_questions() -> list[BenchmarkQuestion]:
     idx = 1
     for template, difficulty in _SQL_TEMPLATES:
         for dim in _SQL_DIMENSIONS:
-            questions.append(BenchmarkQuestion(
-                id=f"SQL{idx:03d}",
-                question=template.format(dim=dim.replace("_", " ")),
-                expected_tools=["sql_tool"], expected_route="SQL_ANALYSIS",
-                expected_sources=["marts.customer_360"], difficulty=difficulty,
-            ))
+            questions.append(
+                BenchmarkQuestion(
+                    id=f"SQL{idx:03d}",
+                    question=template.format(dim=dim.replace("_", " ")),
+                    expected_tools=["sql_tool"],
+                    expected_route="SQL_ANALYSIS",
+                    expected_sources=["marts.customer_360"],
+                    difficulty=difficulty,
+                )
+            )
             idx += 1
     return questions
 
@@ -58,11 +62,16 @@ def _customer_questions() -> list[BenchmarkQuestion]:
     idx = 1
     for template, difficulty in _CUSTOMER_TEMPLATES:
         for cid in _CUSTOMER_IDS:
-            questions.append(BenchmarkQuestion(
-                id=f"CUST{idx:03d}", question=template.format(cid=cid),
-                expected_tools=["customer_lookup"], expected_route="CUSTOMER_LOOKUP",
-                expected_sources=["marts.customer_360"], difficulty=difficulty,
-            ))
+            questions.append(
+                BenchmarkQuestion(
+                    id=f"CUST{idx:03d}",
+                    question=template.format(cid=cid),
+                    expected_tools=["customer_lookup"],
+                    expected_route="CUSTOMER_LOOKUP",
+                    expected_sources=["marts.customer_360"],
+                    difficulty=difficulty,
+                )
+            )
             idx += 1
     return questions
 
@@ -94,8 +103,12 @@ _ML_QUESTIONS = [
 def _ml_questions() -> list[BenchmarkQuestion]:
     return [
         BenchmarkQuestion(
-            id=f"ML{idx:03d}", question=q, expected_tools=["churn_analysis"],
-            expected_route="ML_ANALYSIS", expected_sources=["churn_model"], difficulty=diff,
+            id=f"ML{idx:03d}",
+            question=q,
+            expected_tools=["churn_analysis"],
+            expected_route="ML_ANALYSIS",
+            expected_sources=["churn_model"],
+            difficulty=diff,
         )
         for idx, (q, diff) in enumerate(_ML_QUESTIONS, start=1)
     ]
@@ -104,54 +117,118 @@ def _ml_questions() -> list[BenchmarkQuestion]:
 # (question, difficulty, document_id) - document_id matches
 # src/ai/rag/ingest.py's _document_id() format (path relative to knowledge/).
 _RAG_QUESTIONS = [
-    ("What does our retention playbook say about month-to-month customers flagged as high risk?",
-     "easy", "retention/retention_playbook.md"),
-    ("What guidance does the retention playbook give for long-tenure customers under review?",
-     "medium", "retention/retention_playbook.md"),
-    ("What happens according to policy when a customer logs three complaints in 90 days?",
-     "medium", "retention/retention_playbook.md"),
-    ("How should retention offer effectiveness be measured, per our playbook?",
-     "medium", "retention/retention_playbook.md"),
-    ("What does the service catalog say is included in the online security add-on?",
-     "easy", "telecom_services/service_catalog.md"),
-    ("According to the service catalog, how are streaming TV and streaming movies bundled?",
-     "easy", "telecom_services/service_catalog.md"),
-    ("What does the service catalog say the tech support add-on provides?",
-     "easy", "telecom_services/service_catalog.md"),
-    ("According to the service catalog, what is device protection coverage for?",
-     "easy", "telecom_services/service_catalog.md"),
-    ("What triggers a Tier 3 support escalation, according to policy?",
-     "medium", "customer_support/support_escalation_policy.md"),
-    ("According to the escalation policy, how are late payments handled differently from complaints?",
-     "medium", "customer_support/support_escalation_policy.md"),
-    ("What is the difference between a support contact and a complaint, according to policy?",
-     "medium", "customer_support/support_escalation_policy.md"),
-    ("What does the churn strategy documentation say makes a customer save-worthy?",
-     "medium", "churn_strategy/churn_risk_segments.md"),
-    ("According to our churn strategy guidance, what does it mean for a customer to be not cost-effective to save?",
-     "hard", "churn_strategy/churn_risk_segments.md"),
-    ("What guidance exists for explaining model risk explanations to a non-technical audience?",
-     "hard", "churn_strategy/churn_risk_segments.md"),
-    ("According to the product catalog, which contract type churns the least?",
-     "easy", "product_catalog/plans_and_addons.md"),
-    ("What does the product catalog say about paperless billing being a paid add-on?",
-     "easy", "product_catalog/plans_and_addons.md"),
-    ("What does the product catalog say about how payment method relates to churn risk?",
-     "medium", "product_catalog/plans_and_addons.md"),
-    ("According to policy, who can approve a standard retention offer?",
-     "easy", "policies/discount_and_offer_policy.md"),
-    ("According to policy, how often can a customer receive a retention offer?",
-     "medium", "policies/discount_and_offer_policy.md"),
-    ("What does the offer cost policy say the standard cost assumptions are based on?",
-     "medium", "policies/discount_and_offer_policy.md"),
+    (
+        "What does our retention playbook say about month-to-month customers flagged as high risk?",
+        "easy",
+        "retention/retention_playbook.md",
+    ),
+    (
+        "What guidance does the retention playbook give for long-tenure customers under review?",
+        "medium",
+        "retention/retention_playbook.md",
+    ),
+    (
+        "What happens according to policy when a customer logs three complaints in 90 days?",
+        "medium",
+        "retention/retention_playbook.md",
+    ),
+    (
+        "How should retention offer effectiveness be measured, per our playbook?",
+        "medium",
+        "retention/retention_playbook.md",
+    ),
+    (
+        "What does the service catalog say is included in the online security add-on?",
+        "easy",
+        "telecom_services/service_catalog.md",
+    ),
+    (
+        "According to the service catalog, how are streaming TV and streaming movies bundled?",
+        "easy",
+        "telecom_services/service_catalog.md",
+    ),
+    (
+        "What does the service catalog say the tech support add-on provides?",
+        "easy",
+        "telecom_services/service_catalog.md",
+    ),
+    (
+        "According to the service catalog, what is device protection coverage for?",
+        "easy",
+        "telecom_services/service_catalog.md",
+    ),
+    (
+        "What triggers a Tier 3 support escalation, according to policy?",
+        "medium",
+        "customer_support/support_escalation_policy.md",
+    ),
+    (
+        "According to the escalation policy, how are late payments handled differently from complaints?",
+        "medium",
+        "customer_support/support_escalation_policy.md",
+    ),
+    (
+        "What is the difference between a support contact and a complaint, according to policy?",
+        "medium",
+        "customer_support/support_escalation_policy.md",
+    ),
+    (
+        "What does the churn strategy documentation say makes a customer save-worthy?",
+        "medium",
+        "churn_strategy/churn_risk_segments.md",
+    ),
+    (
+        "According to our churn strategy guidance, what does it mean for a customer to be not cost-effective to save?",
+        "hard",
+        "churn_strategy/churn_risk_segments.md",
+    ),
+    (
+        "What guidance exists for explaining model risk explanations to a non-technical audience?",
+        "hard",
+        "churn_strategy/churn_risk_segments.md",
+    ),
+    (
+        "According to the product catalog, which contract type churns the least?",
+        "easy",
+        "product_catalog/plans_and_addons.md",
+    ),
+    (
+        "What does the product catalog say about paperless billing being a paid add-on?",
+        "easy",
+        "product_catalog/plans_and_addons.md",
+    ),
+    (
+        "What does the product catalog say about how payment method relates to churn risk?",
+        "medium",
+        "product_catalog/plans_and_addons.md",
+    ),
+    (
+        "According to policy, who can approve a standard retention offer?",
+        "easy",
+        "policies/discount_and_offer_policy.md",
+    ),
+    (
+        "According to policy, how often can a customer receive a retention offer?",
+        "medium",
+        "policies/discount_and_offer_policy.md",
+    ),
+    (
+        "What does the offer cost policy say the standard cost assumptions are based on?",
+        "medium",
+        "policies/discount_and_offer_policy.md",
+    ),
 ]
 
 
 def _rag_questions() -> list[BenchmarkQuestion]:
     return [
         BenchmarkQuestion(
-            id=f"RAG{idx:03d}", question=q, expected_tools=["hybrid_search"],
-            expected_route="RAG_SEARCH", expected_documents=[doc], difficulty=diff,
+            id=f"RAG{idx:03d}",
+            question=q,
+            expected_tools=["hybrid_search"],
+            expected_route="RAG_SEARCH",
+            expected_documents=[doc],
+            difficulty=diff,
         )
         for idx, (q, diff, doc) in enumerate(_RAG_QUESTIONS, start=1)
     ]
@@ -164,52 +241,97 @@ def _rag_questions() -> list[BenchmarkQuestion]:
 # not an attempt to inflate the metric.
 _MULTI_SOURCE_QUESTIONS = [
     # SQL + RAG
-    ("Compare churn rate by contract to what our retention policy says.",
-     "medium", ["sql_tool", "hybrid_search"]),
-    ("How does the average monthly charge by tenure bucket compare to what the product catalog "
-     "documentation describes?", "hard", ["sql_tool", "hybrid_search"]),
-    ("What is the total number of complaints by segment, and how does that align with our "
-     "escalation policy?", "hard", ["sql_tool", "hybrid_search"]),
-    ("Compare the churn rate for month-to-month contracts to the guidance in our retention playbook.",
-     "medium", ["sql_tool", "hybrid_search"]),
-    ("How many customers are on a two-year contract, and what does our product catalog "
-     "documentation say about that plan?", "medium", ["sql_tool", "hybrid_search"]),
+    ("Compare churn rate by contract to what our retention policy says.", "medium", ["sql_tool", "hybrid_search"]),
+    (
+        "How does the average monthly charge by tenure bucket compare to what the product catalog "
+        "documentation describes?",
+        "hard",
+        ["sql_tool", "hybrid_search"],
+    ),
+    (
+        "What is the total number of complaints by segment, and how does that align with our escalation policy?",
+        "hard",
+        ["sql_tool", "hybrid_search"],
+    ),
+    (
+        "Compare the churn rate for month-to-month contracts to the guidance in our retention playbook.",
+        "medium",
+        ["sql_tool", "hybrid_search"],
+    ),
+    (
+        "How many customers are on a two-year contract, and what does our product catalog "
+        "documentation say about that plan?",
+        "medium",
+        ["sql_tool", "hybrid_search"],
+    ),
     # SQL + ML
     ("Compare the average churn probability across contract types.", "medium", ["sql_tool", "churn_analysis"]),
     ("What is the average predicted risk factor score by tenure bucket?", "hard", ["sql_tool", "churn_analysis"]),
-    ("How many customers are flagged as likely to churn, broken down by segment?",
-     "medium", ["sql_tool", "churn_analysis"]),
-    ("Compare the churn rate and the recommendation rate across payment methods.",
-     "hard", ["sql_tool", "churn_analysis"]),
-    ("What is the total count of customers with a high churn probability by education level?",
-     "medium", ["sql_tool", "churn_analysis"]),
+    (
+        "How many customers are flagged as likely to churn, broken down by segment?",
+        "medium",
+        ["sql_tool", "churn_analysis"],
+    ),
+    (
+        "Compare the churn rate and the recommendation rate across payment methods.",
+        "hard",
+        ["sql_tool", "churn_analysis"],
+    ),
+    (
+        "What is the total count of customers with a high churn probability by education level?",
+        "medium",
+        ["sql_tool", "churn_analysis"],
+    ),
     # ML + RAG
-    ("What retention guidance addresses the biggest risk factors for churn?",
-     "medium", ["churn_analysis", "hybrid_search"]),
-    ("According to our churn strategy documentation, why is churn probability used instead of a "
-     "raw prediction?", "hard", ["churn_analysis", "hybrid_search"]),
-    ("What does our policy recommend for customers who are likely to churn?",
-     "medium", ["churn_analysis", "hybrid_search"]),
-    ("Explain why our retention playbook treats risk factors differently for long-tenure customers.",
-     "hard", ["churn_analysis", "hybrid_search"]),
-    ("What guidance explains why some customers are predicted to be high risk?",
-     "medium", ["churn_analysis", "hybrid_search"]),
+    (
+        "What retention guidance addresses the biggest risk factors for churn?",
+        "medium",
+        ["churn_analysis", "hybrid_search"],
+    ),
+    (
+        "According to our churn strategy documentation, why is churn probability used instead of a raw prediction?",
+        "hard",
+        ["churn_analysis", "hybrid_search"],
+    ),
+    (
+        "What does our policy recommend for customers who are likely to churn?",
+        "medium",
+        ["churn_analysis", "hybrid_search"],
+    ),
+    (
+        "Explain why our retention playbook treats risk factors differently for long-tenure customers.",
+        "hard",
+        ["churn_analysis", "hybrid_search"],
+    ),
+    (
+        "What guidance explains why some customers are predicted to be high risk?",
+        "medium",
+        ["churn_analysis", "hybrid_search"],
+    ),
     # customer_id + SQL
     ("Compare CUST000001's monthly charges to the segment average.", "medium", ["customer_lookup", "sql_tool"]),
     ("How does CUST000002 compare to the average customer by tenure?", "medium", ["customer_lookup", "sql_tool"]),
-    ("What is CUST000003's total charges compared to other customers in the same segment?",
-     "hard", ["customer_lookup", "sql_tool"]),
+    (
+        "What is CUST000003's total charges compared to other customers in the same segment?",
+        "hard",
+        ["customer_lookup", "sql_tool"],
+    ),
     # customer_id + RAG
     ("What policy applies to CUST000004 given their contract type?", "medium", ["customer_lookup", "hybrid_search"]),
-    ("According to our playbook, what retention offer should CUST000005 receive?",
-     "medium", ["customer_lookup", "hybrid_search"]),
+    (
+        "According to our playbook, what retention offer should CUST000005 receive?",
+        "medium",
+        ["customer_lookup", "hybrid_search"],
+    ),
 ]
 
 
 def _multi_source_questions() -> list[BenchmarkQuestion]:
     return [
         BenchmarkQuestion(
-            id=f"MULTI{idx:03d}", question=q, expected_tools=tools,
+            id=f"MULTI{idx:03d}",
+            question=q,
+            expected_tools=tools,
             expected_route="MULTI_SOURCE",
             expected_sources=["marts.customer_360"] if "sql_tool" in tools or "customer_lookup" in tools else [],
             difficulty=diff,
@@ -235,8 +357,11 @@ _UNSUPPORTED_QUESTIONS = [
 def _unsupported_questions() -> list[BenchmarkQuestion]:
     return [
         BenchmarkQuestion(
-            id=f"UNS{idx:03d}", question=q, expected_tools=[],
-            expected_route="UNSUPPORTED", difficulty=diff,
+            id=f"UNS{idx:03d}",
+            question=q,
+            expected_tools=[],
+            expected_route="UNSUPPORTED",
+            difficulty=diff,
         )
         for idx, (q, diff) in enumerate(_UNSUPPORTED_QUESTIONS, start=1)
     ]
@@ -244,6 +369,10 @@ def _unsupported_questions() -> list[BenchmarkQuestion]:
 
 def load_benchmark_dataset() -> list[BenchmarkQuestion]:
     return (
-        _sql_questions() + _customer_questions() + _ml_questions()
-        + _rag_questions() + _multi_source_questions() + _unsupported_questions()
+        _sql_questions()
+        + _customer_questions()
+        + _ml_questions()
+        + _rag_questions()
+        + _multi_source_questions()
+        + _unsupported_questions()
     )

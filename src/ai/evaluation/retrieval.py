@@ -49,9 +49,7 @@ def mean_reciprocal_rank(runs: list[tuple[list[str], set[str]]]) -> float:
 def ndcg_at_k(retrieved: list[str], relevant: set[str], k: int) -> float:
     """Binary-relevance nDCG@k (no graded relevance in this project's
     ground truth, so gain is 0/1)."""
-    dcg = sum(
-        1.0 / math.log2(i + 1) for i, doc_id in enumerate(retrieved[:k], start=1) if doc_id in relevant
-    )
+    dcg = sum(1.0 / math.log2(i + 1) for i, doc_id in enumerate(retrieved[:k], start=1) if doc_id in relevant)
     ideal_hits = min(len(relevant), k)
     idcg = sum(1.0 / math.log2(i + 1) for i in range(1, ideal_hits + 1))
     return dcg / idcg if idcg > 0 else 0.0
@@ -60,7 +58,15 @@ def ndcg_at_k(retrieved: list[str], relevant: set[str], k: int) -> float:
 def aggregate_metrics(runs: list[tuple[list[str], set[str]]], k: int = 5) -> dict:
     """runs: list of (retrieved_ids, relevant_ids) pairs, one per query."""
     if not runs:
-        return {"recall_at_k": 0.0, "precision_at_k": 0.0, "hit_at_k": 0.0, "mrr": 0.0, "ndcg_at_k": 0.0, "n": 0, "k": k}
+        return {
+            "recall_at_k": 0.0,
+            "precision_at_k": 0.0,
+            "hit_at_k": 0.0,
+            "mrr": 0.0,
+            "ndcg_at_k": 0.0,
+            "n": 0,
+            "k": k,
+        }
     n = len(runs)
     return {
         "recall_at_k": sum(recall_at_k(r, rel, k) for r, rel in runs) / n,

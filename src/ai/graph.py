@@ -58,12 +58,10 @@ UNSUPPORTED_ANSWER = (
     "This assistant can answer questions about customer records, churn/risk "
     "analysis, aggregate statistics, and this platform's own business "
     "documentation. This question doesn't appear to be one of those - try "
-    "asking about a specific customer (e.g. \"CUST000123\"), a churn/segment "
+    'asking about a specific customer (e.g. "CUST000123"), a churn/segment '
     "statistic, or a retention policy."
 )
-INSUFFICIENT_EVIDENCE_ANSWER = (
-    "I don't have enough evidence in the available data to answer that reliably."
-)
+INSUFFICIENT_EVIDENCE_ANSWER = "I don't have enough evidence in the available data to answer that reliably."
 
 _SQL_GENERATION_SYSTEM_PROMPT = """You translate a business question into a single read-only PostgreSQL SELECT query.
 
@@ -113,39 +111,55 @@ def _gather_customer_evidence(customer_id: str) -> tuple[list[Evidence], list[Ci
     if not result.found:
         return evidence, citations, None
 
-    evidence.append(Evidence(
-        type="database", source="marts.customer_360",
-        claim=f"Profile for customer {customer_id}",
-        value=result.profile.model_dump_json(),
-    ))
+    evidence.append(
+        Evidence(
+            type="database",
+            source="marts.customer_360",
+            claim=f"Profile for customer {customer_id}",
+            value=result.profile.model_dump_json(),
+        )
+    )
     citations.append(Citation(label=f"[Customer 360: {customer_id}]", type="database", source="marts.customer_360"))
 
     model_version = None
     if result.churn_probability is not None:
         model_version = result.model_version
-        evidence.append(Evidence(
-            type="model", source=f"churn model {result.model_version}",
-            claim="Predicted churn probability and risk status",
-            value=(
-                f"probability={result.churn_probability}, threshold={result.churn_threshold}, "
-                f"status={result.risk_status}"
-            ),
-        ))
-        citations.append(Citation(
-            label=f"[Churn Model {result.model_version}]", type="model", source=result.model_version or "unknown",
-        ))
+        evidence.append(
+            Evidence(
+                type="model",
+                source=f"churn model {result.model_version}",
+                claim="Predicted churn probability and risk status",
+                value=(
+                    f"probability={result.churn_probability}, threshold={result.churn_threshold}, "
+                    f"status={result.risk_status}"
+                ),
+            )
+        )
+        citations.append(
+            Citation(
+                label=f"[Churn Model {result.model_version}]",
+                type="model",
+                source=result.model_version or "unknown",
+            )
+        )
     if result.shap_factors:
-        evidence.append(Evidence(
-            type="model", source=f"SHAP ({result.model_version})",
-            claim="Top risk factors driving this prediction",
-            value=", ".join(f"{f.feature} ({f.direction})" for f in result.shap_factors),
-        ))
+        evidence.append(
+            Evidence(
+                type="model",
+                source=f"SHAP ({result.model_version})",
+                claim="Top risk factors driving this prediction",
+                value=", ".join(f"{f.feature} ({f.direction})" for f in result.shap_factors),
+            )
+        )
     if result.recommendation:
-        evidence.append(Evidence(
-            type="model", source=f"recommender {result.recommender_version}",
-            claim="Recommended service",
-            value=", ".join(r.service for r in result.recommendation),
-        ))
+        evidence.append(
+            Evidence(
+                type="model",
+                source=f"recommender {result.recommender_version}",
+                claim="Recommended service",
+                value=", ".join(r.service for r in result.recommendation),
+            )
+        )
     return evidence, citations, model_version
 
 
@@ -155,8 +169,10 @@ def _generate_and_run_sql(query: str, llm):
     the trace even when the generated query turns out empty/unsafe."""
     try:
         gen_response = llm.complete(
-            system_prompt=_SQL_GENERATION_SYSTEM_PROMPT, user_prompt=query,
-            max_tokens=300, temperature=0.0,
+            system_prompt=_SQL_GENERATION_SYSTEM_PROMPT,
+            user_prompt=query,
+            max_tokens=300,
+            temperature=0.0,
         )
     except AgentCallFailed as exc:
         log.warning("SQL generation LLM call failed: %s", exc)
@@ -174,11 +190,14 @@ def _gather_sql_evidence(query: str):
     sql_result, agent_response = _generate_and_run_sql(query, get_llm_provider())
     if sql_result is None or not sql_result.rows:
         return [], [], sql_result, agent_response
-    evidence = [Evidence(
-        type="database", source="marts.customer_360 (generated query)",
-        claim="Result of a generated SQL query answering this question",
-        value=str(sql_result.rows[:10]),
-    )]
+    evidence = [
+        Evidence(
+            type="database",
+            source="marts.customer_360 (generated query)",
+            claim="Result of a generated SQL query answering this question",
+            value=str(sql_result.rows[:10]),
+        )
+    ]
     citations = [Citation(label="[Customer 360: generated query]", type="database", source="marts.customer_360")]
     return evidence, citations, sql_result, agent_response
 
@@ -216,11 +235,14 @@ def _gather_feature_importance_evidence(top_k: int = 6) -> list[Evidence]:
         return []
 
     ranked = sorted(importances.items(), key=lambda kv: kv[1], reverse=True)[:top_k]
-    return [Evidence(
-        type="model", source=f"churn model {version}",
-        claim="Features the churn model weighs most heavily, most important first",
-        value=", ".join(f"{col} ({imp / total * 100:.1f}% of total model importance)" for col, imp in ranked),
-    )]
+    return [
+        Evidence(
+            type="model",
+            source=f"churn model {version}",
+            claim="Features the churn model weighs most heavily, most important first",
+            value=", ".join(f"{col} ({imp / total * 100:.1f}% of total model importance)" for col, imp in ranked),
+        )
+    ]
 
 
 def _gather_ml_evidence(filters: dict[str, str] | None = None) -> tuple[list[Evidence], list[Citation], str | None]:
@@ -234,20 +256,26 @@ def _gather_ml_evidence(filters: dict[str, str] | None = None) -> tuple[list[Evi
         return [], [], None
 
     scope = _describe_segment(filters) if filters else "all customers"
-    evidence = [Evidence(
-        type="model", source=f"churn model {result.model_version}",
-        claim=f"Churn statistics for {scope}",
-        value=(
-            f"segment={scope}, "
-            f"current_churn_rate={result.current_churn_rate}, "
-            f"predicted_high_risk_count={result.predicted_high_risk_count}, "
-            f"population_size={result.population_size}"
-        ),
-    )]
-    citations = [Citation(
-        label=f"[Churn Model {result.model_version}, {scope}]",
-        type="model", source=result.model_version or "unknown",
-    )]
+    evidence = [
+        Evidence(
+            type="model",
+            source=f"churn model {result.model_version}",
+            claim=f"Churn statistics for {scope}",
+            value=(
+                f"segment={scope}, "
+                f"current_churn_rate={result.current_churn_rate}, "
+                f"predicted_high_risk_count={result.predicted_high_risk_count}, "
+                f"population_size={result.population_size}"
+            ),
+        )
+    ]
+    citations = [
+        Citation(
+            label=f"[Churn Model {result.model_version}, {scope}]",
+            type="model",
+            source=result.model_version or "unknown",
+        )
+    ]
 
     # A segment question is implicitly comparative ("why is churn worse for
     # X?" means worse *than the rest*), so the population baseline rides
@@ -257,16 +285,19 @@ def _gather_ml_evidence(filters: dict[str, str] | None = None) -> tuple[list[Evi
     if filters:
         overall = churn_analysis()
         if overall.population_size:
-            evidence.append(Evidence(
-                type="model", source=f"churn model {overall.model_version}",
-                claim="Whole-population baseline, for comparison against the segment above",
-                value=(
-                    f"segment=all customers, "
-                    f"current_churn_rate={overall.current_churn_rate}, "
-                    f"predicted_high_risk_count={overall.predicted_high_risk_count}, "
-                    f"population_size={overall.population_size}"
-                ),
-            ))
+            evidence.append(
+                Evidence(
+                    type="model",
+                    source=f"churn model {overall.model_version}",
+                    claim="Whole-population baseline, for comparison against the segment above",
+                    value=(
+                        f"segment=all customers, "
+                        f"current_churn_rate={overall.current_churn_rate}, "
+                        f"predicted_high_risk_count={overall.predicted_high_risk_count}, "
+                        f"population_size={overall.population_size}"
+                    ),
+                )
+            )
 
     return evidence, citations, result.model_version
 
@@ -275,11 +306,14 @@ def _gather_rag_evidence(query: str) -> tuple[list[Evidence], list[Citation]]:
     candidates = hybrid_search(query, top_k_final=3)
     evidence, citations = [], []
     for c in candidates:
-        evidence.append(Evidence(
-            type="document", source=c.document_id,
-            claim=f"Relevant passage from {c.title}" + (f", section {c.section}" if c.section else ""),
-            value=c.text,
-        ))
+        evidence.append(
+            Evidence(
+                type="document",
+                source=c.document_id,
+                claim=f"Relevant passage from {c.title}" + (f", section {c.section}" if c.section else ""),
+                value=c.text,
+            )
+        )
         label = f"[{c.title}" + (f", {c.section}" if c.section else "") + "]"
         citations.append(Citation(label=label, type="document", source=c.document_id))
     return evidence, citations
@@ -292,7 +326,8 @@ def _generate_answer(query: str, evidence: list[Evidence]):
         response = get_llm_provider().complete(
             system_prompt=_GENERATION_SYSTEM_PROMPT,
             user_prompt=f"Question: {query}\n\nEvidence:\n{evidence_text}",
-            max_tokens=400, temperature=0.2,
+            max_tokens=400,
+            temperature=0.2,
         )
         return response.text.strip(), response, False
     except AgentCallFailed as exc:
@@ -302,29 +337,31 @@ def _generate_answer(query: str, evidence: list[Evidence]):
 
 def _write_trace_safely(**trace_fields) -> None:
     try:
-        tracing.write_trace({
-            "trace_id": trace_fields["trace_id"],
-            "user_query": trace_fields["query"],
-            "route": trace_fields["route"],
-            "tools_used": trace_fields["tools_used"],
-            "tool_latency_ms": trace_fields["tool_latency"],
-            "sql_query_hash": trace_fields["sql_hash"],
-            "retrieval_latency_ms": trace_fields["tool_latency"].get("hybrid_search"),
-            "retrieved_documents": trace_fields["retrieved_documents"],
-            # Not separately instrumented - see src/ai/rag/hybrid_search.py;
-            # "hybrid_search" in tool_latency_ms covers retrieval end-to-end.
-            "reranker_latency_ms": None,
-            "llm_model": trace_fields["llm_model"],
-            "input_tokens": trace_fields["input_tokens"],
-            "output_tokens": trace_fields["output_tokens"],
-            "estimated_cost_usd": estimate_cost(
-                trace_fields["llm_model"], trace_fields["input_tokens"], trace_fields["output_tokens"]
-            ),
-            "total_latency_ms": trace_fields["total_latency_ms"],
-            "validation_result": trace_fields["validation_result"],
-            "fallback_status": trace_fields["fallback_status"],
-            "error": trace_fields["error"],
-        })
+        tracing.write_trace(
+            {
+                "trace_id": trace_fields["trace_id"],
+                "user_query": trace_fields["query"],
+                "route": trace_fields["route"],
+                "tools_used": trace_fields["tools_used"],
+                "tool_latency_ms": trace_fields["tool_latency"],
+                "sql_query_hash": trace_fields["sql_hash"],
+                "retrieval_latency_ms": trace_fields["tool_latency"].get("hybrid_search"),
+                "retrieved_documents": trace_fields["retrieved_documents"],
+                # Not separately instrumented - see src/ai/rag/hybrid_search.py;
+                # "hybrid_search" in tool_latency_ms covers retrieval end-to-end.
+                "reranker_latency_ms": None,
+                "llm_model": trace_fields["llm_model"],
+                "input_tokens": trace_fields["input_tokens"],
+                "output_tokens": trace_fields["output_tokens"],
+                "estimated_cost_usd": estimate_cost(
+                    trace_fields["llm_model"], trace_fields["input_tokens"], trace_fields["output_tokens"]
+                ),
+                "total_latency_ms": trace_fields["total_latency_ms"],
+                "validation_result": trace_fields["validation_result"],
+                "fallback_status": trace_fields["fallback_status"],
+                "error": trace_fields["error"],
+            }
+        )
     except Exception:
         log.exception("failed to write trace %s (response is unaffected)", trace_fields["trace_id"])
 
@@ -337,12 +374,26 @@ def run_query(query: str) -> AssistantResponse:
     if route == UNSUPPORTED:
         latency_ms = round((time.monotonic() - start) * 1000, 2)
         _write_trace_safely(
-            trace_id=trace_id, query=query, route=route, tools_used=[], tool_latency={},
-            sql_hash=None, retrieved_documents=[], llm_model=None, input_tokens=0, output_tokens=0,
-            validation_result="unsupported", fallback_status=False, error=None, total_latency_ms=latency_ms,
+            trace_id=trace_id,
+            query=query,
+            route=route,
+            tools_used=[],
+            tool_latency={},
+            sql_hash=None,
+            retrieved_documents=[],
+            llm_model=None,
+            input_tokens=0,
+            output_tokens=0,
+            validation_result="unsupported",
+            fallback_status=False,
+            error=None,
+            total_latency_ms=latency_ms,
         )
         return AssistantResponse(
-            answer=UNSUPPORTED_ANSWER, route=route, trace_id=trace_id, latency_ms=latency_ms,
+            answer=UNSUPPORTED_ANSWER,
+            route=route,
+            trace_id=trace_id,
+            latency_ms=latency_ms,
         )
 
     evidence: list[Evidence] = []
@@ -357,7 +408,9 @@ def run_query(query: str) -> AssistantResponse:
     if signals["has_customer_id"]:
         tools_used.append("customer_lookup")
         result = _run_timed(
-            tool_latency, errors, "customer_lookup",
+            tool_latency,
+            errors,
+            "customer_lookup",
             lambda: _gather_customer_evidence(signals["customer_id"]),
         )
         if result is not None:
@@ -382,14 +435,19 @@ def run_query(query: str) -> AssistantResponse:
         if signals["asks_for_drivers"]:
             tools_used.append("feature_importances")
             importance_evidence = _run_timed(
-                tool_latency, errors, "feature_importances", _gather_feature_importance_evidence,
+                tool_latency,
+                errors,
+                "feature_importances",
+                _gather_feature_importance_evidence,
             )
             if importance_evidence:
                 evidence += importance_evidence
 
         tools_used.append("churn_analysis")
         result = _run_timed(
-            tool_latency, errors, "churn_analysis",
+            tool_latency,
+            errors,
+            "churn_analysis",
             lambda: _gather_ml_evidence(signals["segment_filters"]),
         )
         if result is not None:
@@ -412,14 +470,28 @@ def run_query(query: str) -> AssistantResponse:
 
     if not evidence:
         _write_trace_safely(
-            trace_id=trace_id, query=query, route=route, tools_used=tools_used, tool_latency=tool_latency,
-            sql_hash=sql_hash, retrieved_documents=retrieved_documents, llm_model=None,
-            input_tokens=0, output_tokens=0, validation_result="insufficient_evidence",
-            fallback_status=False, error=combined_error, total_latency_ms=latency_ms,
+            trace_id=trace_id,
+            query=query,
+            route=route,
+            tools_used=tools_used,
+            tool_latency=tool_latency,
+            sql_hash=sql_hash,
+            retrieved_documents=retrieved_documents,
+            llm_model=None,
+            input_tokens=0,
+            output_tokens=0,
+            validation_result="insufficient_evidence",
+            fallback_status=False,
+            error=combined_error,
+            total_latency_ms=latency_ms,
         )
         return AssistantResponse(
-            answer=INSUFFICIENT_EVIDENCE_ANSWER, tools_used=tools_used,
-            model_version=model_version, route=route, trace_id=trace_id, latency_ms=latency_ms,
+            answer=INSUFFICIENT_EVIDENCE_ANSWER,
+            tools_used=tools_used,
+            model_version=model_version,
+            route=route,
+            trace_id=trace_id,
+            latency_ms=latency_ms,
         )
 
     answer_text, gen_response, generation_failed = _generate_answer(query, evidence)
@@ -428,8 +500,14 @@ def run_query(query: str) -> AssistantResponse:
     latency_ms = round((time.monotonic() - start) * 1000, 2)
 
     response = AssistantResponse(
-        answer=answer_text, citations=citations, evidence=evidence, tools_used=tools_used,
-        model_version=model_version, route=route, trace_id=trace_id, latency_ms=latency_ms,
+        answer=answer_text,
+        citations=citations,
+        evidence=evidence,
+        tools_used=tools_used,
+        model_version=model_version,
+        route=route,
+        trace_id=trace_id,
+        latency_ms=latency_ms,
     )
     validated = validate_response(response)
 
@@ -440,9 +518,19 @@ def run_query(query: str) -> AssistantResponse:
     output_tokens = sum(r.completion_tokens for r in llm_calls)
 
     _write_trace_safely(
-        trace_id=trace_id, query=query, route=route, tools_used=tools_used, tool_latency=tool_latency,
-        sql_hash=sql_hash, retrieved_documents=retrieved_documents, llm_model=llm_model,
-        input_tokens=input_tokens, output_tokens=output_tokens, validation_result=validation_result,
-        fallback_status=fallback_status, error=combined_error, total_latency_ms=validated.latency_ms,
+        trace_id=trace_id,
+        query=query,
+        route=route,
+        tools_used=tools_used,
+        tool_latency=tool_latency,
+        sql_hash=sql_hash,
+        retrieved_documents=retrieved_documents,
+        llm_model=llm_model,
+        input_tokens=input_tokens,
+        output_tokens=output_tokens,
+        validation_result=validation_result,
+        fallback_status=fallback_status,
+        error=combined_error,
+        total_latency_ms=validated.latency_ms,
     )
     return validated

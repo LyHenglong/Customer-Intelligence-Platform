@@ -116,9 +116,7 @@ def numeric_psi(expected: pd.Series, actual: pd.Series, bins: int = 10) -> float
     if exp_valid.empty or act_valid.empty:
         # Nothing to compare on the value axis; the missingness shift is the
         # only signal available.
-        return _psi_from_proportions(
-            np.array([exp_null, 1 - exp_null]), np.array([act_null, 1 - act_null])
-        )
+        return _psi_from_proportions(np.array([exp_null, 1 - exp_null]), np.array([act_null, 1 - act_null]))
 
     quantiles = np.linspace(0, 1, bins + 1)
     edges = np.unique(np.quantile(exp_valid, quantiles))
@@ -127,9 +125,7 @@ def numeric_psi(expected: pd.Series, actual: pd.Series, bins: int = 10) -> float
         # constant, so compare "equal to that value" vs "not equal".
         only = edges[0]
         exp_pct = np.array([1.0, 0.0])
-        act_pct = np.array(
-            [float((act_valid == only).mean()), float((act_valid != only).mean())]
-        )
+        act_pct = np.array([float((act_valid == only).mean()), float((act_valid != only).mean())])
     else:
         # Open the outer edges so values beyond the reference range - the
         # most obvious kind of drift - land in the end bins instead of being
@@ -172,12 +168,8 @@ def compute_drift(
     Pure function - no I/O - which is what makes it directly testable
     without a database.
     """
-    numeric_features = list(
-        numeric_features if numeric_features is not None else NUMERIC_FEATURES
-    )
-    categorical_features = list(
-        categorical_features if categorical_features is not None else CATEGORICAL_FEATURES
-    )
+    numeric_features = list(numeric_features if numeric_features is not None else NUMERIC_FEATURES)
+    categorical_features = list(categorical_features if categorical_features is not None else CATEGORICAL_FEATURES)
 
     rows = []
     for feature in numeric_features:
@@ -216,10 +208,7 @@ def load_batch_features(batch_file: str) -> pd.DataFrame:
     OOM-killed earlier versions of this project on a 3.8GB VM.
     """
     columns = DRIFT_FEATURES
-    query = (
-        f"SELECT {', '.join(columns)} FROM public.customers_cleaned "
-        "WHERE source_batch = %(batch)s"
-    )
+    query = f"SELECT {', '.join(columns)} FROM public.customers_cleaned WHERE source_batch = %(batch)s"
     return stream_query(query, columns=columns, params={"batch": batch_file})
 
 
@@ -296,9 +285,7 @@ def detect_drift_for_batch(current_batch: str, reference_batch: Optional[str] = 
         conn = get_pg_conn()
         try:
             with conn.cursor() as cur:
-                cur.execute(
-                    "SELECT batch_file FROM ingestion_log ORDER BY loaded_at ASC LIMIT 1"
-                )
+                cur.execute("SELECT batch_file FROM ingestion_log ORDER BY loaded_at ASC LIMIT 1")
                 row = cur.fetchone()
         finally:
             conn.close()
@@ -336,7 +323,7 @@ def detect_drift_for_batch(current_batch: str, reference_batch: Optional[str] = 
         send_slack_alert(
             f":warning: *Feature drift detected* - batch `{current_batch}` vs. "
             f"baseline `{reference_batch}`: {len(drifted)} feature(s) at "
-            f"\"significant\" severity (max PSI {max_psi:.4f}): {', '.join(drifted)}"
+            f'"significant" severity (max PSI {max_psi:.4f}): {", ".join(drifted)}'
         )
 
     return {
@@ -359,9 +346,7 @@ if __name__ == "__main__":
         conn = get_pg_conn()
         try:
             with conn.cursor() as cur:
-                cur.execute(
-                    "SELECT batch_file FROM ingestion_log ORDER BY loaded_at DESC LIMIT 1"
-                )
+                cur.execute("SELECT batch_file FROM ingestion_log ORDER BY loaded_at DESC LIMIT 1")
                 batch = cur.fetchone()[0]
         finally:
             conn.close()

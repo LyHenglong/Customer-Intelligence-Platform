@@ -48,9 +48,7 @@ def _glob_latest(models_dir: Path, pattern: str) -> Optional[Path]:
     return matches[-1] if matches else None
 
 
-def resolve_model_path(
-    registered_name: str, glob_pattern: str, models_dir: Path = MODELS_DIR
-) -> Optional[Path]:
+def resolve_model_path(registered_name: str, glob_pattern: str, models_dir: Path = MODELS_DIR) -> Optional[Path]:
     """Returns the local models_store path to load for `registered_name`
     (e.g. "churn_model" or "recommender"), preferring MLflow's "champion"
     alias and falling back to `glob_pattern` (e.g. "churn_model_*.joblib")
@@ -74,11 +72,13 @@ def resolve_model_path(
                 return candidate
             log.warning(
                 "MLflow champion for %s points at %r, not found locally; falling back to glob",
-                registered_name, model_file,
+                registered_name,
+                model_file,
             )
         except Exception as exc:
             log.warning(
                 "MLflow unreachable or no champion alias for %s (%s); falling back to glob-latest",
-                registered_name, exc,
+                registered_name,
+                exc,
             )
     return _glob_latest(models_dir, glob_pattern)

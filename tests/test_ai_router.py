@@ -18,17 +18,20 @@ from src.ai.router import (
 )
 
 
-@pytest.mark.parametrize("query,expected", [
-    ("Show customer CUST000123", CUSTOMER_LOOKUP),
-    ("Why is CUST0005 at risk?", CUSTOMER_LOOKUP),  # customer id + ML keyword -> still a lookup
-    ("What is the average monthly charge by contract type?", SQL_ANALYSIS),
-    ("Compare churn rate between month-to-month and long-term customers.", SQL_ANALYSIS),
-    ("What are the biggest risk factors for churn?", ML_ANALYSIS),
-    ("What does our retention policy say about month-to-month customers?", RAG_SEARCH),
-    ("What retention actions are supported by our business documentation?", RAG_SEARCH),
-    ("Tell me tomorrow's weather", UNSUPPORTED),
-    ("", UNSUPPORTED),
-])
+@pytest.mark.parametrize(
+    "query,expected",
+    [
+        ("Show customer CUST000123", CUSTOMER_LOOKUP),
+        ("Why is CUST0005 at risk?", CUSTOMER_LOOKUP),  # customer id + ML keyword -> still a lookup
+        ("What is the average monthly charge by contract type?", SQL_ANALYSIS),
+        ("Compare churn rate between month-to-month and long-term customers.", SQL_ANALYSIS),
+        ("What are the biggest risk factors for churn?", ML_ANALYSIS),
+        ("What does our retention policy say about month-to-month customers?", RAG_SEARCH),
+        ("What retention actions are supported by our business documentation?", RAG_SEARCH),
+        ("Tell me tomorrow's weather", UNSUPPORTED),
+        ("", UNSUPPORTED),
+    ],
+)
 def test_classify_matches_expected_route(query, expected):
     assert classify(query) == expected
 
@@ -56,8 +59,12 @@ def test_signals_extract_the_customer_id_uppercased():
 def test_signals_report_false_when_nothing_matches():
     _, signals = classify_with_signals("hello there")
     assert signals == {
-        "has_customer_id": False, "has_sql": False, "has_ml": False,
-        "has_rag": False, "customer_id": None, "segment_filters": {},
+        "has_customer_id": False,
+        "has_sql": False,
+        "has_ml": False,
+        "has_rag": False,
+        "customer_id": None,
+        "segment_filters": {},
         "asks_for_drivers": False,
     }
 
@@ -89,12 +96,13 @@ def test_segment_phrases_map_to_warehouse_values():
 def test_contract_and_tenure_phrases_combine():
     _, signals = classify_with_signals("churn probability for new customers on month-to-month")
     assert signals["segment_filters"] == {
-        "contract": "month_to_month", "tenure_bucket": "new_0_6mo",
+        "contract": "month_to_month",
+        "tenure_bucket": "new_0_6mo",
     }
 
 
 def test_tenure_phrases_require_adjacency_and_degrade_safely():
-    """"new ... customers" with words in between matches only the contract.
+    """ "new ... customers" with words in between matches only the contract.
     Deliberate: the alternative is a looser pattern that would read "new"
     in unrelated phrasings and silently answer about the wrong population.
     Missing a filter yields a broader, correctly-labelled answer; inventing

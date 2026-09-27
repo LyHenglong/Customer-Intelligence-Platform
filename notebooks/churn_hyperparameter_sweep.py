@@ -79,13 +79,25 @@ CANDIDATES = [
     {"n_estimators": 600, "max_depth": 4, "learning_rate": 0.05},
     {"n_estimators": 600, "max_depth": 8, "learning_rate": 0.05},
     {"n_estimators": 600, "max_depth": -1, "num_leaves": 63, "learning_rate": 0.05},
-    {"n_estimators": 600, "max_depth": 6, "learning_rate": 0.05,
-     "subsample": 0.8, "subsample_freq": 1, "colsample_bytree": 0.8},
-    {"n_estimators": 600, "max_depth": 6, "learning_rate": 0.05,
-     "reg_alpha": 1.0, "reg_lambda": 5.0},
-    {"n_estimators": 1000, "max_depth": 5, "learning_rate": 0.03,
-     "subsample": 0.8, "subsample_freq": 1, "colsample_bytree": 0.8,
-     "reg_lambda": 5.0, "min_child_samples": 50},
+    {
+        "n_estimators": 600,
+        "max_depth": 6,
+        "learning_rate": 0.05,
+        "subsample": 0.8,
+        "subsample_freq": 1,
+        "colsample_bytree": 0.8,
+    },
+    {"n_estimators": 600, "max_depth": 6, "learning_rate": 0.05, "reg_alpha": 1.0, "reg_lambda": 5.0},
+    {
+        "n_estimators": 1000,
+        "max_depth": 5,
+        "learning_rate": 0.03,
+        "subsample": 0.8,
+        "subsample_freq": 1,
+        "colsample_bytree": 0.8,
+        "reg_lambda": 5.0,
+        "min_child_samples": 50,
+    },
 ]
 
 
@@ -94,14 +106,18 @@ def _build_preprocessor() -> ColumnTransformer:
     only thing varying across candidates is the model's hyperparameters.
     Duplicated rather than imported because build_pipeline() returns the
     preprocessor already welded to a fixed LGBMClassifier."""
-    categorical_transformer = Pipeline(steps=[
-        ("impute", SimpleImputer(strategy="most_frequent")),
-        ("onehot", OneHotEncoder(handle_unknown="ignore")),
-    ])
-    return ColumnTransformer(transformers=[
-        ("num", SimpleImputer(strategy="median"), NUMERIC_FEATURES + BOOLEAN_FEATURES),
-        ("cat", categorical_transformer, CATEGORICAL_FEATURES),
-    ])
+    categorical_transformer = Pipeline(
+        steps=[
+            ("impute", SimpleImputer(strategy="most_frequent")),
+            ("onehot", OneHotEncoder(handle_unknown="ignore")),
+        ]
+    )
+    return ColumnTransformer(
+        transformers=[
+            ("num", SimpleImputer(strategy="median"), NUMERIC_FEATURES + BOOLEAN_FEATURES),
+            ("cat", categorical_transformer, CATEGORICAL_FEATURES),
+        ]
+    )
 
 
 def _make_pipeline(params: dict) -> Pipeline:
@@ -112,10 +128,12 @@ def _make_pipeline(params: dict) -> Pipeline:
         verbose=-1,
         **params,
     )
-    return Pipeline([
-        ("preprocess", _build_preprocessor()),
-        ("model", clf),
-    ])
+    return Pipeline(
+        [
+            ("preprocess", _build_preprocessor()),
+            ("model", clf),
+        ]
+    )
 
 
 def _score(params: dict, X, y, cv) -> tuple[float, float, float]:
@@ -127,7 +145,9 @@ def _score(params: dict, X, y, cv) -> tuple[float, float, float]:
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument(
-        "--rows", type=int, default=200_000,
+        "--rows",
+        type=int,
+        default=200_000,
         help="rows to sample for the sweep (memory-bound; see README's RAM note)",
     )
     parser.add_argument("--folds", type=int, default=4)
@@ -150,27 +170,44 @@ def main() -> None:
     # The test split is held back from the entire sweep and scored once, at
     # the end, by the winner only.
     X_dev, X_test, y_dev, y_test = train_test_split(
-        X, y, test_size=0.25, random_state=42, stratify=y,
+        X,
+        y,
+        test_size=0.25,
+        random_state=42,
+        stratify=y,
     )
     del X, y
-    log.info("dev set %d rows, held-out test %d rows, churn rate %.4f",
-             len(X_dev), len(X_test), float(y_dev.mean()))
+    log.info("dev set %d rows, held-out test %d rows, churn rate %.4f", len(X_dev), len(X_test), float(y_dev.mean()))
 
     cv = StratifiedKFold(n_splits=args.folds, shuffle=True, random_state=42)
 
     results = []
     base_mean, base_std, base_secs = _score(BASELINE, X_dev, y_dev, cv)
     log.info("BASELINE (production config)  AUC %.4f +/- %.4f  [%.0fs]", base_mean, base_std, base_secs)
-    results.append({"label": "baseline (production)", "params": BASELINE,
-                    "auc_mean": base_mean, "auc_std": base_std, "seconds": base_secs})
+    results.append(
+        {
+            "label": "baseline (production)",
+            "params": BASELINE,
+            "auc_mean": base_mean,
+            "auc_std": base_std,
+            "seconds": base_secs,
+        }
+    )
 
     for i, params in enumerate(CANDIDATES, 1):
         mean, std, secs = _score(params, X_dev, y_dev, cv)
         delta = mean - base_mean
-        log.info("candidate %d/%d  AUC %.4f +/- %.4f  (delta %+.4f)  %s  [%.0fs]",
-                 i, len(CANDIDATES), mean, std, delta, params, secs)
-        results.append({"label": f"candidate {i}", "params": params,
-                        "auc_mean": mean, "auc_std": std, "seconds": secs})
+        log.info(
+            "candidate %d/%d  AUC %.4f +/- %.4f  (delta %+.4f)  %s  [%.0fs]",
+            i,
+            len(CANDIDATES),
+            mean,
+            std,
+            delta,
+            params,
+            secs,
+        )
+        results.append({"label": f"candidate {i}", "params": params, "auc_mean": mean, "auc_std": std, "seconds": secs})
 
     results.sort(key=lambda r: r["auc_mean"], reverse=True)
     best = results[0]
@@ -187,32 +224,39 @@ def main() -> None:
     print(f"{'config':<24} {'CV AUC':>10} {'+/-':>8} {'vs base':>10}")
     print("-" * 78)
     for r in results:
-        print(f"{r['label']:<24} {r['auc_mean']:>10.4f} {r['auc_std']:>8.4f} "
-              f"{r['auc_mean'] - base_mean:>+10.4f}")
+        print(f"{r['label']:<24} {r['auc_mean']:>10.4f} {r['auc_std']:>8.4f} {r['auc_mean'] - base_mean:>+10.4f}")
     print("=" * 78)
     print(f"\nBaseline fold-to-fold std: {base_std:.4f}")
     print(f"Best improvement:          {improvement:+.4f}")
     print(f"Adoption threshold:        > {base_std:.4f} (one baseline std)")
-    print(f"VERDICT: {'ADOPT ' + str(best['params']) if adopt else 'KEEP PRODUCTION CONFIG - gain is inside the noise'}")
+    print(
+        f"VERDICT: {'ADOPT ' + str(best['params']) if adopt else 'KEEP PRODUCTION CONFIG - gain is inside the noise'}"
+    )
 
     if adopt:
         log.info("scoring the winner once on the held-out test set")
         pipeline = _make_pipeline(best["params"]).fit(X_dev, y_dev)
         from sklearn.metrics import roc_auc_score
+
         test_auc = roc_auc_score(y_test, pipeline.predict_proba(X_test)[:, 1])
         print(f"Held-out test AUC for the winner: {test_auc:.4f}")
         best["held_out_test_auc"] = float(test_auc)
 
     out = Path("report/hyperparameter_sweep_results.json")
     out.parent.mkdir(parents=True, exist_ok=True)
-    out.write_text(json.dumps({
-        "rows_used": int(len(X_dev) + len(X_test)),
-        "folds": args.folds,
-        "baseline_auc_mean": base_mean,
-        "baseline_auc_std": base_std,
-        "adopted": adopt,
-        "results": results,
-    }, indent=2))
+    out.write_text(
+        json.dumps(
+            {
+                "rows_used": int(len(X_dev) + len(X_test)),
+                "folds": args.folds,
+                "baseline_auc_mean": base_mean,
+                "baseline_auc_std": base_std,
+                "adopted": adopt,
+                "results": results,
+            },
+            indent=2,
+        )
+    )
     print(f"\nWrote {out}")
 
 

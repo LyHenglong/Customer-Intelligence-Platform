@@ -131,8 +131,12 @@ def get_or_generate(customer_id: str, agent_type: str, model_version: str, gener
         return cached
     response = generate_fn()
     put_cached_content(
-        customer_id, agent_type, model_version,
-        response.text, response.prompt_tokens, response.completion_tokens,
+        customer_id,
+        agent_type,
+        model_version,
+        response.text,
+        response.prompt_tokens,
+        response.completion_tokens,
     )
     return response.text
 
@@ -174,9 +178,7 @@ def get_latest_retrain_summary() -> Optional[dict]:
     conn = get_pg_conn()
     try:
         with conn.cursor() as cur:
-            cur.execute(
-                "SELECT to_regclass('public.retrain_summaries')"
-            )
+            cur.execute("SELECT to_regclass('public.retrain_summaries')")
             if cur.fetchone()[0] is None:
                 return None
             cur.execute(

@@ -77,7 +77,9 @@ def _already_registered(client: MlflowClient, registered_name: str, artifact_fil
     return any(v.tags.get("model_file") == artifact_filename for v in versions)
 
 
-def _migrate_one(client: MlflowClient, experiment_id: str, registered_name: str, meta_path: Path, artifact_key: str) -> None:
+def _migrate_one(
+    client: MlflowClient, experiment_id: str, registered_name: str, meta_path: Path, artifact_key: str
+) -> None:
     metadata = json.loads(meta_path.read_text())
     artifact_filename = metadata[artifact_key]
     artifact_path = MODELS_DIR / artifact_filename
@@ -110,7 +112,9 @@ def _migrate_one(client: MlflowClient, experiment_id: str, registered_name: str,
     client.set_terminated(run_id, status="FINISHED", end_time=start_ms)
 
     mv = client.create_model_version(
-        registered_name, source=f"runs:/{run_id}/{artifact_filename}", run_id=run_id,
+        registered_name,
+        source=f"runs:/{run_id}/{artifact_filename}",
+        run_id=run_id,
     )
     client.set_model_version_tag(registered_name, mv.version, "model_file", artifact_filename)
     log.info("Backfilled %s as %s v%s (run %s)", artifact_filename, registered_name, mv.version, run_id)

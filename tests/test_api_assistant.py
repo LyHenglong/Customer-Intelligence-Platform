@@ -30,8 +30,13 @@ def _no_real_startup_work(monkeypatch):
 def test_assistant_query_returns_the_graph_result(monkeypatch):
     canned = AssistantResponse(
         answer="Month-to-month customers churn more than long-term customers.",
-        citations=[], evidence=[], tools_used=["churn_analysis"],
-        model_version="V1", route="ML_ANALYSIS", trace_id="abc123", latency_ms=12.3,
+        citations=[],
+        evidence=[],
+        tools_used=["churn_analysis"],
+        model_version="V1",
+        route="ML_ANALYSIS",
+        trace_id="abc123",
+        latency_ms=12.3,
     )
     monkeypatch.setattr(assistant_router, "ai_run_query", lambda query: canned)
 
@@ -75,9 +80,7 @@ def test_assistant_query_accepts_optional_conversation_id(monkeypatch):
     monkeypatch.setattr(assistant_router, "ai_run_query", _fake_run_query)
 
     with TestClient(app_module.app) as client:
-        response = client.post(
-            "/assistant/query", json={"query": "hello", "conversation_id": "conv-1"}
-        )
+        response = client.post("/assistant/query", json={"query": "hello", "conversation_id": "conv-1"})
 
     assert response.status_code == 200
     assert captured["query"] == "hello"

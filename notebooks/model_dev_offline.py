@@ -47,22 +47,44 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(me
 log = logging.getLogger("model_dev_offline")
 
 _SERVICE_FLAGS = [
-    "has_phone_service", "has_internet_service", "has_online_security",
-    "has_online_backup", "has_device_protection", "has_tech_support",
-    "has_streaming_tv", "has_streaming_movies",
+    "has_phone_service",
+    "has_internet_service",
+    "has_online_security",
+    "has_online_backup",
+    "has_device_protection",
+    "has_tech_support",
+    "has_streaming_tv",
+    "has_streaming_movies",
 ]
 
 NUMERIC_FEATURES = [
-    "age", "annual_income", "dependents", "tenure", "tenure_years",
-    "monthlycharges", "totalcharges", "num_services", "total_active_services",
-    "cost_per_active_service", "customer_satisfaction", "num_complaints",
-    "num_service_calls", "late_payments", "avg_monthly_gb", "avg_gb_per_service",
-    "days_since_last_interaction", "credit_score", "complaints_per_tenure_month",
+    "age",
+    "annual_income",
+    "dependents",
+    "tenure",
+    "tenure_years",
+    "monthlycharges",
+    "totalcharges",
+    "num_services",
+    "total_active_services",
+    "cost_per_active_service",
+    "customer_satisfaction",
+    "num_complaints",
+    "num_service_calls",
+    "late_payments",
+    "avg_monthly_gb",
+    "avg_gb_per_service",
+    "days_since_last_interaction",
+    "credit_score",
+    "complaints_per_tenure_month",
     "annual_spend_to_income_ratio",
 ]
 BOOLEAN_FEATURES = [
-    "senior_citizen", "paperless_billing", *_SERVICE_FLAGS,
-    "is_month_to_month", "is_disengaged",
+    "senior_citizen",
+    "paperless_billing",
+    *_SERVICE_FLAGS,
+    "is_month_to_month",
+    "is_disengaged",
 ]
 CATEGORICAL_FEATURES = ["gender", "education", "marital_status", "contract", "payment_method", "tenure_bucket"]
 TARGET = "churn"
@@ -97,7 +119,8 @@ def build_customer_360_locally() -> pd.DataFrame:
         np.nan,
     )
     df["tenure_bucket"] = pd.cut(
-        df["tenure"], bins=[-1, 5, 23, 10_000],
+        df["tenure"],
+        bins=[-1, 5, 23, 10_000],
         labels=["new_0_6mo", "established_6_24mo", "loyal_24mo_plus"],
     ).astype(str)
 
@@ -110,10 +133,21 @@ def build_customer_360_locally() -> pd.DataFrame:
 
 
 def make_preprocessor(numeric_cols, categorical_cols) -> ColumnTransformer:
-    return ColumnTransformer(transformers=[
-        ("num", SimpleImputer(strategy="median"), numeric_cols),
-        ("cat", Pipeline([("impute", SimpleImputer(strategy="most_frequent")), ("onehot", OneHotEncoder(handle_unknown="ignore"))]), categorical_cols),
-    ])
+    return ColumnTransformer(
+        transformers=[
+            ("num", SimpleImputer(strategy="median"), numeric_cols),
+            (
+                "cat",
+                Pipeline(
+                    [
+                        ("impute", SimpleImputer(strategy="most_frequent")),
+                        ("onehot", OneHotEncoder(handle_unknown="ignore")),
+                    ]
+                ),
+                categorical_cols,
+            ),
+        ]
+    )
 
 
 def fit_eval(pipeline, X_train, y_train, X_test, y_test, label: str) -> dict:
@@ -126,12 +160,22 @@ def fit_eval(pipeline, X_train, y_train, X_test, y_test, label: str) -> dict:
     elapsed = time.time() - t0
     log.info(
         "[%-32s] precision=%.3f recall=%.3f f1=%.3f auc=%.3f  (%.1fs)",
-        label, report["1"]["precision"], report["1"]["recall"], report["1"]["f1-score"], auc, elapsed,
+        label,
+        report["1"]["precision"],
+        report["1"]["recall"],
+        report["1"]["f1-score"],
+        auc,
+        elapsed,
     )
     return {
-        "label": label, "auc": auc,
-        "precision": report["1"]["precision"], "recall": report["1"]["recall"], "f1": report["1"]["f1-score"],
-        "proba": proba, "pipeline": pipeline, "seconds": elapsed,
+        "label": label,
+        "auc": auc,
+        "precision": report["1"]["precision"],
+        "recall": report["1"]["recall"],
+        "f1": report["1"]["f1-score"],
+        "proba": proba,
+        "pipeline": pipeline,
+        "seconds": elapsed,
     }
 
 
@@ -146,7 +190,14 @@ def main():
     log.info("Total rows: %d", len(df))
     log.info("Class balance: %s", df[TARGET].value_counts(normalize=True).round(4).to_dict())
 
-    all_cols = set(df.columns) - {"customer_id", TARGET, "signup_date", "signup_month", "signup_dayofweek", "signup_year"}
+    all_cols = set(df.columns) - {
+        "customer_id",
+        TARGET,
+        "signup_date",
+        "signup_month",
+        "signup_dayofweek",
+        "signup_year",
+    }
     used = set(ALL_FEATURES)
     log.info("customer_360 columns available as raw features: %d", len(all_cols))
     log.info("Currently used as model features: %d", len(used))
@@ -155,13 +206,17 @@ def main():
     # Redundancy check: tenure vs tenure_years should correlate ~1.0 (pure rescale)
     corr_tenure = df["tenure"].corr(df["tenure_years"])
     log.info("Redundancy check: corr(tenure, tenure_years) = %.4f (near-1.0 = fully redundant pair)", corr_tenure)
-    log.info("Redundancy check: is_month_to_month is a direct re-encoding of contract=='month_to_month' (kept - harmless for tree models, gives the tree a direct split)")
+    log.info(
+        "Redundancy check: is_month_to_month is a direct re-encoding of contract=='month_to_month' (kept - harmless for tree models, gives the tree a direct split)"
+    )
 
     # Leakage check: nothing here is derived FROM churn - confirm by construction:
     # every derived column traces back to raw source columns (monthlycharges,
     # tenure, num_complaints, annual_income, days_since_last_interaction), never
     # to the churn label itself. No target leakage.
-    log.info("Leakage check: all 20 derived/engineered features trace to raw non-target columns only - no target leakage found.")
+    log.info(
+        "Leakage check: all 20 derived/engineered features trace to raw non-target columns only - no target leakage found."
+    )
 
     X_full = df[ALL_FEATURES].copy()
     for c in BOOLEAN_FEATURES:
@@ -171,8 +226,17 @@ def main():
     X_train, X_test, y_train, y_test = train_test_split(X_full, y, test_size=0.2, random_state=42, stratify=y)
 
     baseline_pre = make_preprocessor(NUMERIC_FEATURES + BOOLEAN_FEATURES, CATEGORICAL_FEATURES)
-    baseline_rf = Pipeline([("prep", baseline_pre), ("model", RandomForestClassifier(
-        n_estimators=200, max_depth=12, class_weight="balanced", random_state=42, n_jobs=-1))])
+    baseline_rf = Pipeline(
+        [
+            ("prep", baseline_pre),
+            (
+                "model",
+                RandomForestClassifier(
+                    n_estimators=200, max_depth=12, class_weight="balanced", random_state=42, n_jobs=-1
+                ),
+            ),
+        ]
+    )
     baseline_result = fit_eval(baseline_rf, X_train, y_train, X_test, y_test, "Baseline RF (current 38 features)")
 
     # Individual (not grouped) feature importances
@@ -185,17 +249,31 @@ def main():
     extra_numeric = NUMERIC_FEATURES + ["signup_month", "signup_dayofweek", "signup_year"]
     X_train_ext = X_train.copy()
     X_test_ext = X_test.copy()
-    X_train_ext[["signup_month", "signup_dayofweek", "signup_year"]] = df.loc[X_train.index, ["signup_month", "signup_dayofweek", "signup_year"]]
-    X_test_ext[["signup_month", "signup_dayofweek", "signup_year"]] = df.loc[X_test.index, ["signup_month", "signup_dayofweek", "signup_year"]]
+    X_train_ext[["signup_month", "signup_dayofweek", "signup_year"]] = df.loc[
+        X_train.index, ["signup_month", "signup_dayofweek", "signup_year"]
+    ]
+    X_test_ext[["signup_month", "signup_dayofweek", "signup_year"]] = df.loc[
+        X_test.index, ["signup_month", "signup_dayofweek", "signup_year"]
+    ]
     ext_pre = make_preprocessor(extra_numeric + BOOLEAN_FEATURES, CATEGORICAL_FEATURES)
-    ext_rf = Pipeline([("prep", ext_pre), ("model", RandomForestClassifier(
-        n_estimators=200, max_depth=12, class_weight="balanced", random_state=42, n_jobs=-1))])
+    ext_rf = Pipeline(
+        [
+            ("prep", ext_pre),
+            (
+                "model",
+                RandomForestClassifier(
+                    n_estimators=200, max_depth=12, class_weight="balanced", random_state=42, n_jobs=-1
+                ),
+            ),
+        ]
+    )
     ext_result = fit_eval(ext_rf, X_train_ext, y_train, X_test_ext, y_test, "RF + signup-date features (41 features)")
 
     signup_helps = ext_result["auc"] > baseline_result["auc"] + 0.003  # small margin, not noise
     log.info(
         "Signup-date features verdict: AUC %.4f -> %.4f (%s) - %s",
-        baseline_result["auc"], ext_result["auc"],
+        baseline_result["auc"],
+        ext_result["auc"],
         "+" if ext_result["auc"] >= baseline_result["auc"] else "-",
         "keeping them, real (if small) lift" if signup_helps else "no meaningful lift, NOT adding them",
     )
@@ -224,14 +302,20 @@ def main():
         idx = idx_candidates[-1]  # highest threshold that still clears this recall
         log.info(
             "  to hit recall >= %.2f: threshold=%.3f -> precision=%.3f, recall=%.3f",
-            target_recall, thresholds[idx], precisions[idx], recalls[idx],
+            target_recall,
+            thresholds[idx],
+            precisions[idx],
+            recalls[idx],
         )
     f1s = 2 * precisions * recalls / (precisions + recalls + 1e-9)
     best_idx = np.argmax(f1s[:-1])
     best_f1_threshold = thresholds[best_idx]
     log.info(
         "Best-F1 threshold: %.3f -> precision=%.3f recall=%.3f f1=%.3f",
-        best_f1_threshold, precisions[best_idx], recalls[best_idx], f1s[best_idx],
+        best_f1_threshold,
+        precisions[best_idx],
+        recalls[best_idx],
+        f1s[best_idx],
     )
     # business-chosen threshold: prioritize recall (catching churners) at a
     # still-reasonable precision, for a retention-campaign use case
@@ -240,7 +324,10 @@ def main():
     biz_threshold = thresholds[biz_idx]
     log.info(
         "Chosen business threshold (>=0.60 recall priority): %.3f -> precision=%.3f recall=%.3f f1=%.3f",
-        biz_threshold, precisions[biz_idx], recalls[biz_idx], f1s[biz_idx],
+        biz_threshold,
+        precisions[biz_idx],
+        recalls[biz_idx],
+        f1s[biz_idx],
     )
 
     # =========================================================================
@@ -250,21 +337,60 @@ def main():
     model_results = [baseline_result]
 
     from xgboost import XGBClassifier
-    xgb_pipeline = Pipeline([("prep", final_preprocessor), ("model", XGBClassifier(
-        n_estimators=300, max_depth=6, learning_rate=0.1,
-        scale_pos_weight=(y_train == 0).sum() / (y_train == 1).sum(),
-        eval_metric="logloss", random_state=42, n_jobs=-1))])
-    model_results.append(fit_eval(xgb_pipeline, X_train_final, y_train, X_test_final, y_test, "XGBoost (scale_pos_weight)"))
+
+    xgb_pipeline = Pipeline(
+        [
+            ("prep", final_preprocessor),
+            (
+                "model",
+                XGBClassifier(
+                    n_estimators=300,
+                    max_depth=6,
+                    learning_rate=0.1,
+                    scale_pos_weight=(y_train == 0).sum() / (y_train == 1).sum(),
+                    eval_metric="logloss",
+                    random_state=42,
+                    n_jobs=-1,
+                ),
+            ),
+        ]
+    )
+    model_results.append(
+        fit_eval(xgb_pipeline, X_train_final, y_train, X_test_final, y_test, "XGBoost (scale_pos_weight)")
+    )
 
     from lightgbm import LGBMClassifier
-    lgbm_pipeline = Pipeline([("prep", final_preprocessor), ("model", LGBMClassifier(
-        n_estimators=300, max_depth=6, learning_rate=0.1,
-        class_weight="balanced", random_state=42, n_jobs=-1, verbose=-1))])
-    model_results.append(fit_eval(lgbm_pipeline, X_train_final, y_train, X_test_final, y_test, "LightGBM (class_weight=balanced)"))
 
-    logreg_pipeline = Pipeline([("prep", final_preprocessor), ("model", LogisticRegression(
-        class_weight="balanced", max_iter=1000, random_state=42))])
-    model_results.append(fit_eval(logreg_pipeline, X_train_final, y_train, X_test_final, y_test, "LogisticRegression (baseline)"))
+    lgbm_pipeline = Pipeline(
+        [
+            ("prep", final_preprocessor),
+            (
+                "model",
+                LGBMClassifier(
+                    n_estimators=300,
+                    max_depth=6,
+                    learning_rate=0.1,
+                    class_weight="balanced",
+                    random_state=42,
+                    n_jobs=-1,
+                    verbose=-1,
+                ),
+            ),
+        ]
+    )
+    model_results.append(
+        fit_eval(lgbm_pipeline, X_train_final, y_train, X_test_final, y_test, "LightGBM (class_weight=balanced)")
+    )
+
+    logreg_pipeline = Pipeline(
+        [
+            ("prep", final_preprocessor),
+            ("model", LogisticRegression(class_weight="balanced", max_iter=1000, random_state=42)),
+        ]
+    )
+    model_results.append(
+        fit_eval(logreg_pipeline, X_train_final, y_train, X_test_final, y_test, "LogisticRegression (baseline)")
+    )
 
     log.info("\nStep 3 comparison table:")
     print(pd.DataFrame(model_results)[["label", "auc", "precision", "recall", "f1"]].to_string(index=False))
@@ -285,7 +411,12 @@ def main():
 
     smote = SMOTE(random_state=42, n_jobs=-1)
     X_train_res, y_train_res = smote.fit_resample(X_train_dense, y_train)
-    log.info("SMOTE: %d rows -> %d rows (class balance now %s)", len(y_train), len(y_train_res), pd.Series(y_train_res).value_counts(normalize=True).round(3).to_dict())
+    log.info(
+        "SMOTE: %d rows -> %d rows (class balance now %s)",
+        len(y_train),
+        len(y_train_res),
+        pd.Series(y_train_res).value_counts(normalize=True).round(3).to_dict(),
+    )
 
     X_test_transformed = prep_for_smote.transform(X_test_final)
     X_test_dense = X_test_transformed.toarray() if hasattr(X_test_transformed, "toarray") else X_test_transformed
@@ -294,9 +425,13 @@ def main():
     # data with NO class_weight (SMOTE already balances the classes directly)
     is_xgb_best = "XGBoost" in best_model_result["label"]
     if is_xgb_best:
-        smote_model = XGBClassifier(n_estimators=300, max_depth=6, learning_rate=0.1, eval_metric="logloss", random_state=42, n_jobs=-1)
+        smote_model = XGBClassifier(
+            n_estimators=300, max_depth=6, learning_rate=0.1, eval_metric="logloss", random_state=42, n_jobs=-1
+        )
     else:
-        smote_model = LGBMClassifier(n_estimators=300, max_depth=6, learning_rate=0.1, random_state=42, n_jobs=-1, verbose=-1)
+        smote_model = LGBMClassifier(
+            n_estimators=300, max_depth=6, learning_rate=0.1, random_state=42, n_jobs=-1, verbose=-1
+        )
 
     t0 = time.time()
     smote_model.fit(X_train_res, y_train_res)
@@ -307,17 +442,28 @@ def main():
     elapsed = time.time() - t0
     smote_result = {
         "label": f"{'XGBoost' if is_xgb_best else 'LightGBM'} + SMOTE (no class_weight)",
-        "auc": auc_smote, "precision": report_smote["1"]["precision"],
-        "recall": report_smote["1"]["recall"], "f1": report_smote["1"]["f1-score"], "seconds": elapsed,
+        "auc": auc_smote,
+        "precision": report_smote["1"]["precision"],
+        "recall": report_smote["1"]["recall"],
+        "f1": report_smote["1"]["f1-score"],
+        "seconds": elapsed,
     }
     log.info(
         "[%-32s] precision=%.3f recall=%.3f f1=%.3f auc=%.3f  (%.1fs)",
-        smote_result["label"], smote_result["precision"], smote_result["recall"], smote_result["f1"], smote_result["auc"], elapsed,
+        smote_result["label"],
+        smote_result["precision"],
+        smote_result["recall"],
+        smote_result["f1"],
+        smote_result["auc"],
+        elapsed,
     )
     log.info(
         "SMOTE verdict: AUC %.4f (class_weight/scale_pos_weight) vs %.4f (SMOTE) -> %s",
-        best_model_result["auc"], auc_smote,
-        "SMOTE helps" if auc_smote > best_model_result["auc"] + 0.003 else "no meaningful improvement over class_weight",
+        best_model_result["auc"],
+        auc_smote,
+        "SMOTE helps"
+        if auc_smote > best_model_result["auc"] + 0.003
+        else "no meaningful improvement over class_weight",
     )
 
     # =========================================================================
@@ -334,12 +480,25 @@ def main():
         y_tr, y_val = y.iloc[train_idx], y.iloc[val_idx]
         cv_pre = make_preprocessor(NUMERIC_FEATURES + BOOLEAN_FEATURES, CATEGORICAL_FEATURES)
         if "XGBoost" in overall_best["label"]:
-            cv_model = XGBClassifier(n_estimators=300, max_depth=6, learning_rate=0.1,
-                                      scale_pos_weight=(y_tr == 0).sum() / (y_tr == 1).sum(),
-                                      eval_metric="logloss", random_state=42, n_jobs=-1)
+            cv_model = XGBClassifier(
+                n_estimators=300,
+                max_depth=6,
+                learning_rate=0.1,
+                scale_pos_weight=(y_tr == 0).sum() / (y_tr == 1).sum(),
+                eval_metric="logloss",
+                random_state=42,
+                n_jobs=-1,
+            )
         else:
-            cv_model = LGBMClassifier(n_estimators=300, max_depth=6, learning_rate=0.1,
-                                       class_weight="balanced", random_state=42, n_jobs=-1, verbose=-1)
+            cv_model = LGBMClassifier(
+                n_estimators=300,
+                max_depth=6,
+                learning_rate=0.1,
+                class_weight="balanced",
+                random_state=42,
+                n_jobs=-1,
+                verbose=-1,
+            )
         cv_pipeline = Pipeline([("prep", cv_pre), ("model", cv_model)])
         cv_pipeline.fit(X_tr, y_tr)
         cv_proba = cv_pipeline.predict_proba(X_val)[:, 1]
@@ -353,7 +512,10 @@ def main():
 
     log.info(
         "5-fold CV result: AUC = %.4f +/- %.4f | F1 = %.4f +/- %.4f",
-        np.mean(cv_aucs), np.std(cv_aucs), np.mean(cv_f1s), np.std(cv_f1s),
+        np.mean(cv_aucs),
+        np.std(cv_aucs),
+        np.mean(cv_f1s),
+        np.std(cv_f1s),
     )
 
     # =========================================================================
@@ -364,15 +526,19 @@ def main():
     print(final_table.to_string(index=False))
     log.info(
         "\nBaseline (RF @ 0.5):    auc=%.4f f1=%.4f",
-        baseline_result["auc"], baseline_result["f1"],
+        baseline_result["auc"],
+        baseline_result["f1"],
     )
     log.info(
         "Best single-split result: %s -> auc=%.4f f1=%.4f",
-        overall_best["label"], overall_best["auc"], overall_best.get("f1", float("nan")),
+        overall_best["label"],
+        overall_best["auc"],
+        overall_best.get("f1", float("nan")),
     )
     log.info(
         "5-fold CV (honest estimate): auc=%.4f +/- %.4f",
-        np.mean(cv_aucs), np.std(cv_aucs),
+        np.mean(cv_aucs),
+        np.std(cv_aucs),
     )
     log.info("Total wall time: %.1fs", time.time() - t_start)
 

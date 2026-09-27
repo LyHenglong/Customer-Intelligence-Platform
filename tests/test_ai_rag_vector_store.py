@@ -20,13 +20,12 @@ class _RecordingCursor:
         self.executed.append((q, params))
         if "AS score" in q:
             self.description = [
-                (c,) for c in
-                ["chunk_id", "document_id", "title", "source", "section", "page", "text", "metadata", "score"]
+                (c,)
+                for c in ["chunk_id", "document_id", "title", "source", "section", "page", "text", "metadata", "score"]
             ]
         elif "FROM public.rag_chunks" in q and "SELECT chunk_id" in q:
             self.description = [
-                (c,) for c in
-                ["chunk_id", "document_id", "title", "source", "section", "page", "text", "metadata"]
+                (c,) for c in ["chunk_id", "document_id", "title", "source", "section", "page", "text", "metadata"]
             ]
         else:
             self.description = None
@@ -94,10 +93,28 @@ def test_upsert_chunks_issues_one_upsert_per_chunk(monkeypatch):
     monkeypatch.setattr(vector_store, "register_vector", lambda c: None)
 
     chunks = [
-        {"chunk_id": "c1", "document_id": "d1", "title": "T", "source": "d1",
-         "section": "S", "page": None, "text": "hello", "metadata": {}, "embedding": [0.1, 0.2]},
-        {"chunk_id": "c2", "document_id": "d1", "title": "T", "source": "d1",
-         "section": "S", "page": None, "text": "world", "metadata": {}, "embedding": [0.3, 0.4]},
+        {
+            "chunk_id": "c1",
+            "document_id": "d1",
+            "title": "T",
+            "source": "d1",
+            "section": "S",
+            "page": None,
+            "text": "hello",
+            "metadata": {},
+            "embedding": [0.1, 0.2],
+        },
+        {
+            "chunk_id": "c2",
+            "document_id": "d1",
+            "title": "T",
+            "source": "d1",
+            "section": "S",
+            "page": None,
+            "text": "world",
+            "metadata": {},
+            "embedding": [0.3, 0.4],
+        },
     ]
     vector_store.upsert_chunks(chunks)
 
@@ -144,10 +161,19 @@ def test_vector_search_returns_scored_rows_when_table_exists(monkeypatch):
 
     results = vector_store.vector_search([0.1, 0.2], top_k=5)
 
-    assert results == [{
-        "chunk_id": "c1", "document_id": "d1", "title": "T", "source": "d1",
-        "section": "S", "page": None, "text": "hello", "metadata": {}, "score": 0.87,
-    }]
+    assert results == [
+        {
+            "chunk_id": "c1",
+            "document_id": "d1",
+            "title": "T",
+            "source": "d1",
+            "section": "S",
+            "page": None,
+            "text": "hello",
+            "metadata": {},
+            "score": 0.87,
+        }
+    ]
 
 
 def test_fetch_all_chunks_for_bm25_returns_empty_when_table_missing(monkeypatch):
@@ -164,7 +190,15 @@ def test_fetch_all_chunks_for_bm25_returns_rows(monkeypatch):
 
     results = vector_store.fetch_all_chunks_for_bm25()
 
-    assert results == [{
-        "chunk_id": "c1", "document_id": "d1", "title": "T", "source": "d1",
-        "section": "S", "page": None, "text": "hello", "metadata": {},
-    }]
+    assert results == [
+        {
+            "chunk_id": "c1",
+            "document_id": "d1",
+            "title": "T",
+            "source": "d1",
+            "section": "S",
+            "page": None,
+            "text": "hello",
+            "metadata": {},
+        }
+    ]

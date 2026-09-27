@@ -49,9 +49,19 @@ def test_rejects_sql_block_comment():
         validate_sql("SELECT 1 /* sneaky */ FROM marts.customer_360")
 
 
-@pytest.mark.parametrize("keyword", [
-    "INSERT", "UPDATE", "DELETE", "DROP", "ALTER", "TRUNCATE", "CREATE", "GRANT",
-])
+@pytest.mark.parametrize(
+    "keyword",
+    [
+        "INSERT",
+        "UPDATE",
+        "DELETE",
+        "DROP",
+        "ALTER",
+        "TRUNCATE",
+        "CREATE",
+        "GRANT",
+    ],
+)
 def test_rejects_forbidden_keyword_inside_an_otherwise_select_shaped_string(keyword):
     with pytest.raises(SQLSafetyError, match="forbidden keyword"):
         validate_sql(f"SELECT * FROM marts.customer_360 WHERE 1=1 OR {keyword} ")
@@ -74,18 +84,21 @@ def test_rejects_query_with_no_identifiable_table():
         validate_sql("SELECT 1")
 
 
-@pytest.mark.parametrize("table", [
-    "marts.customer_360", "public.feature_drift", "public.ingestion_log", "public.retrain_summaries",
-])
+@pytest.mark.parametrize(
+    "table",
+    [
+        "marts.customer_360",
+        "public.feature_drift",
+        "public.ingestion_log",
+        "public.retrain_summaries",
+    ],
+)
 def test_accepts_every_allowlisted_table(table):
     assert validate_sql(f"SELECT * FROM {table}")
 
 
 def test_accepts_a_join_between_two_allowed_tables():
-    q = (
-        "SELECT c.customer_id, f.psi FROM marts.customer_360 c "
-        "JOIN public.feature_drift f ON c.customer_id = f.feature"
-    )
+    q = "SELECT c.customer_id, f.psi FROM marts.customer_360 c JOIN public.feature_drift f ON c.customer_id = f.feature"
     assert validate_sql(q) == q
 
 
@@ -97,6 +110,7 @@ def test_rejects_join_that_pulls_in_a_disallowed_table():
 
 # Regressions: the allowlist used to be enforced by a regex that only saw
 # the first schema-qualified name after each FROM/JOIN keyword.
+
 
 def test_rejects_a_comma_join_to_a_disallowed_table():
     with pytest.raises(SQLSafetyError, match="allowlist"):
@@ -125,10 +139,17 @@ def test_rejects_a_table_valued_function_as_a_from_source():
         validate_sql("SELECT * FROM generate_series(1, 1000000000)")
 
 
-@pytest.mark.parametrize("call", [
-    "pg_read_file('/etc/passwd')", "pg_sleep(10)", "current_setting('data_directory')",
-    "version()", "query_to_xml('select 1', true, true, '')", "dblink('x', 'y')",
-])
+@pytest.mark.parametrize(
+    "call",
+    [
+        "pg_read_file('/etc/passwd')",
+        "pg_sleep(10)",
+        "current_setting('data_directory')",
+        "version()",
+        "query_to_xml('select 1', true, true, '')",
+        "dblink('x', 'y')",
+    ],
+)
 def test_rejects_system_and_admin_functions(call):
     with pytest.raises(SQLSafetyError, match="forbidden function"):
         validate_sql(f"SELECT {call} FROM marts.customer_360")

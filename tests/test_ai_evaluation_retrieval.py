@@ -82,18 +82,27 @@ class TestCompareRetrievalMethods:
 
         def _fake_hybrid_search(query, top_k_final, use_reranker):
             doc = "docC" if use_reranker else "docD"
-            return [RetrievalCandidate(
-                document_id=doc, chunk_id="c1", text="t", title="T",
-                score=1.0, rank=1, retrieval_method="hybrid",
-            )]
+            return [
+                RetrievalCandidate(
+                    document_id=doc,
+                    chunk_id="c1",
+                    text="t",
+                    title="T",
+                    score=1.0,
+                    rank=1,
+                    retrieval_method="hybrid",
+                )
+            ]
 
         monkeypatch.setattr(hybrid_module, "hybrid_search", _fake_hybrid_search)
 
         results = compare_retrieval_methods("some question", top_k=5)
 
         assert results == {
-            "bm25_only": ["docA"], "vector_only": ["docB"],
-            "hybrid": ["docD"], "hybrid_reranked": ["docC"],
+            "bm25_only": ["docA"],
+            "vector_only": ["docB"],
+            "hybrid": ["docD"],
+            "hybrid_reranked": ["docC"],
         }
 
     def test_score_retrieval_methods_scores_each_method_independently(self):

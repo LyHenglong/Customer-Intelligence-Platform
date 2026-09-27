@@ -8,9 +8,15 @@ from src.ai.observability.metrics import compute_metrics
 
 def _trace(**overrides):
     base = {
-        "route": "ML_ANALYSIS", "tools_used": ["churn_analysis"], "total_latency_ms": 100.0,
-        "error": None, "fallback_status": False, "retrieved_documents": [],
-        "input_tokens": 10, "output_tokens": 5, "estimated_cost_usd": 0.001,
+        "route": "ML_ANALYSIS",
+        "tools_used": ["churn_analysis"],
+        "total_latency_ms": 100.0,
+        "error": None,
+        "fallback_status": False,
+        "retrieved_documents": [],
+        "input_tokens": 10,
+        "output_tokens": 5,
+        "estimated_cost_usd": 0.001,
     }
     base.update(overrides)
     return base

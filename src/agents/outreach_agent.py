@@ -82,8 +82,10 @@ def draft_outreach(explanation: str, recommended_service: str) -> AgentResponse:
         # Not fatal - the message is still shown - but worth knowing about,
         # since it means the guardrail in the prompt didn't hold.
         import logging
+
         logging.getLogger("agents.outreach_agent").warning(
             "drafted message may not mention the recommended service %r: %r",
-            recommended_service, response.text[:200],
+            recommended_service,
+            response.text[:200],
         )
     return response

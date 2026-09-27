@@ -42,9 +42,7 @@ def ensure_table() -> None:
                 )
                 """
             )
-            cur.execute(
-                "CREATE INDEX IF NOT EXISTS idx_rag_chunks_document_id ON public.rag_chunks (document_id)"
-            )
+            cur.execute("CREATE INDEX IF NOT EXISTS idx_rag_chunks_document_id ON public.rag_chunks (document_id)")
         conn.commit()
     finally:
         conn.close()
@@ -80,9 +78,15 @@ def upsert_chunks(chunks: list[dict]) -> None:
                            created_at = EXCLUDED.created_at
                     """,
                     (
-                        c["chunk_id"], c["document_id"], c["title"], c["source"],
-                        c.get("section"), c.get("page"), c["text"],
-                        json.dumps(c.get("metadata", {})), c["embedding"],
+                        c["chunk_id"],
+                        c["document_id"],
+                        c["title"],
+                        c["source"],
+                        c.get("section"),
+                        c.get("page"),
+                        c["text"],
+                        json.dumps(c.get("metadata", {})),
+                        c["embedding"],
                     ),
                 )
         conn.commit()
@@ -147,8 +151,7 @@ def fetch_all_chunks_for_bm25() -> list[dict]:
             if cur.fetchone()[0] is None:
                 return []
             cur.execute(
-                "SELECT chunk_id, document_id, title, source, section, page, text, metadata "
-                "FROM public.rag_chunks"
+                "SELECT chunk_id, document_id, title, source, section, page, text, metadata FROM public.rag_chunks"
             )
             cols = [d[0] for d in cur.description]
             rows = cur.fetchall()

@@ -42,13 +42,14 @@ import numpy as np
 import pandas as pd
 
 # --- Illustrative business assumptions (see module docstring) -------------
-OFFER_COST = 30.0          # cost of extending one retention offer
-P_OFFER_SUCCESS = 0.30     # probability an offer actually retains a would-be churner
+OFFER_COST = 30.0  # cost of extending one retention offer
+P_OFFER_SUCCESS = 0.30  # probability an offer actually retains a would-be churner
 RETENTION_HORIZON_MONTHS = 12  # months of revenue credited to a saved customer
 
 
-def customer_value(monthly_charges: pd.Series | np.ndarray,
-                   horizon_months: int = RETENTION_HORIZON_MONTHS) -> np.ndarray:
+def customer_value(
+    monthly_charges: pd.Series | np.ndarray, horizon_months: int = RETENTION_HORIZON_MONTHS
+) -> np.ndarray:
     """Value of saving a customer: their own monthly spend over the horizon."""
     return np.asarray(monthly_charges, dtype=float) * horizon_months
 
@@ -99,10 +100,7 @@ def profit_curve(
     """Expected profit across a sweep of thresholds."""
     if thresholds is None:
         thresholds = np.linspace(0.01, 0.99, 99)
-    rows = [
-        expected_value_at_threshold(y_true, y_proba, values, t, offer_cost, p_offer_success)
-        for t in thresholds
-    ]
+    rows = [expected_value_at_threshold(y_true, y_proba, values, t, offer_cost, p_offer_success) for t in thresholds]
     return pd.DataFrame(rows)
 
 
@@ -156,12 +154,14 @@ def sensitivity_grid(
     for cost in offer_costs:
         for p_success in success_rates:
             t, best = optimal_threshold(y_true, y_proba, values, offer_cost=cost, p_offer_success=p_success)
-            rows.append({
-                "offer_cost": cost,
-                "p_offer_success": p_success,
-                "optimal_threshold": t,
-                "net_value": best["net_value"],
-                "n_flagged": best["n_flagged"],
-                "recall": best["recall"],
-            })
+            rows.append(
+                {
+                    "offer_cost": cost,
+                    "p_offer_success": p_success,
+                    "optimal_threshold": t,
+                    "net_value": best["net_value"],
+                    "n_flagged": best["n_flagged"],
+                    "recall": best["recall"],
+                }
+            )
     return pd.DataFrame(rows)

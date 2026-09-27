@@ -57,8 +57,7 @@ def _format_drift(drift_summary: Optional[dict]) -> str:
     if drift_summary.get("drift_detected"):
         features = ", ".join(drift_summary.get("drifted_features", [])) or "unspecified"
         return (
-            f"Drift results: significant drift detected (max PSI "
-            f"{drift_summary.get('max_psi', 0):.4f}) in: {features}"
+            f"Drift results: significant drift detected (max PSI {drift_summary.get('max_psi', 0):.4f}) in: {features}"
         )
     return f"Drift results: no significant drift detected (max PSI {drift_summary.get('max_psi', 0):.4f})"
 

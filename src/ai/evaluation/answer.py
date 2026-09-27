@@ -20,9 +20,34 @@ from src.ai.guardrails.grounding import extract_numbers, find_unsupported_number
 from src.ai.schemas import AssistantResponse, BenchmarkQuestion
 
 _STOPWORDS = {
-    "the", "a", "an", "is", "are", "was", "were", "what", "which", "who",
-    "why", "how", "does", "do", "did", "our", "this", "that", "for", "of",
-    "in", "on", "to", "and", "or", "with", "by", "at",
+    "the",
+    "a",
+    "an",
+    "is",
+    "are",
+    "was",
+    "were",
+    "what",
+    "which",
+    "who",
+    "why",
+    "how",
+    "does",
+    "do",
+    "did",
+    "our",
+    "this",
+    "that",
+    "for",
+    "of",
+    "in",
+    "on",
+    "to",
+    "and",
+    "or",
+    "with",
+    "by",
+    "at",
 }
 
 

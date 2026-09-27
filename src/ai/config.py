@@ -22,9 +22,11 @@ SQL_STATEMENT_TIMEOUT_MS = int(os.environ.get("AI_SQL_STATEMENT_TIMEOUT_MS", "50
 # warehouse (raw_customers/customers_cleaned/llm_explanations are excluded
 # on purpose: raw layers and cached LLM output aren't meant for ad hoc
 # querying by a generated SQL statement).
-SQL_ALLOWED_TABLES = frozenset({
-    "marts.customer_360",
-    "public.feature_drift",
-    "public.ingestion_log",
-    "public.retrain_summaries",
-})
+SQL_ALLOWED_TABLES = frozenset(
+    {
+        "marts.customer_360",
+        "public.feature_drift",
+        "public.ingestion_log",
+        "public.retrain_summaries",
+    }
+)

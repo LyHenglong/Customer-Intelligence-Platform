@@ -150,5 +150,6 @@ class AssistantQueryRequest(BaseModel):
     # Bounded: every character is sent to a paid LLM, and a real question
     # about this data never needs more.
     query: str = Field(..., max_length=2000)
-    conversation_id: Optional[str] = None  # accepted, not yet used - see AI_Customer_Intelligence_Claude_Code_Plan.md section 27
-
+    conversation_id: Optional[str] = (
+        None  # accepted, not yet used - see AI_Customer_Intelligence_Claude_Code_Plan.md section 27
+    )

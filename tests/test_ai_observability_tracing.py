@@ -78,14 +78,27 @@ def test_write_trace_inserts_with_on_conflict_do_nothing(monkeypatch):
     conn = _RecordingConn()
     monkeypatch.setattr(tracing, "get_pg_conn", lambda: conn)
 
-    tracing.write_trace({
-        "trace_id": "t1", "user_query": "hello", "route": "ML_ANALYSIS",
-        "tools_used": ["churn_analysis"], "tool_latency_ms": {"churn_analysis": 12.0},
-        "sql_query_hash": None, "retrieval_latency_ms": None, "retrieved_documents": [],
-        "reranker_latency_ms": None, "llm_model": "fake-model", "input_tokens": 5,
-        "output_tokens": 5, "estimated_cost_usd": 0.0, "total_latency_ms": 42.0,
-        "validation_result": "grounded", "fallback_status": False, "error": None,
-    })
+    tracing.write_trace(
+        {
+            "trace_id": "t1",
+            "user_query": "hello",
+            "route": "ML_ANALYSIS",
+            "tools_used": ["churn_analysis"],
+            "tool_latency_ms": {"churn_analysis": 12.0},
+            "sql_query_hash": None,
+            "retrieval_latency_ms": None,
+            "retrieved_documents": [],
+            "reranker_latency_ms": None,
+            "llm_model": "fake-model",
+            "input_tokens": 5,
+            "output_tokens": 5,
+            "estimated_cost_usd": 0.0,
+            "total_latency_ms": 42.0,
+            "validation_result": "grounded",
+            "fallback_status": False,
+            "error": None,
+        }
+    )
 
     insert_statements = [q for q, p in conn.executed if "INSERT INTO public.ai_traces" in q]
     assert len(insert_statements) == 1

@@ -33,8 +33,13 @@ from src.model.train_recommender import recommend_for_customer, recommend_for_pr
 from src.warehouse import get_pg_conn
 
 _DISPLAY_COLUMNS = [
-    "customer_id", "contract", "tenure", "monthlycharges",
-    "tenure_bucket", "total_active_services", "customer_satisfaction",
+    "customer_id",
+    "contract",
+    "tenure",
+    "monthlycharges",
+    "tenure_bucket",
+    "total_active_services",
+    "customer_satisfaction",
     "num_complaints",
 ]
 
@@ -67,9 +72,7 @@ def customer_lookup(customer_id: str) -> CustomerLookupResult:
         return CustomerLookupResult(customer_id=customer_id, found=False)
 
     row_dict = dict(zip(fetch_columns, row, strict=False))
-    result = CustomerLookupResult(
-        customer_id=customer_id, found=True, profile=_row_to_profile(row_dict)
-    )
+    result = CustomerLookupResult(customer_id=customer_id, found=True, profile=_row_to_profile(row_dict))
 
     if churn_artifact is not None:
         X = pd.DataFrame([row_dict], columns=CHURN_FEATURES)
@@ -108,9 +111,7 @@ def customer_lookup(customer_id: str) -> CustomerLookupResult:
     return result
 
 
-def customer_search(
-    filters: CustomerSearchFilters, limit: int = 25, offset: int = 0
-) -> CustomerSearchResult:
+def customer_search(filters: CustomerSearchFilters, limit: int = 25, offset: int = 0) -> CustomerSearchResult:
     """Filtered, paginated customer search against marts.customer_360.
 
     Filtering and pagination happen in SQL, never "fetch everything, filter
@@ -149,9 +150,7 @@ def customer_search(
         params.append(filters.min_complaints)
 
     where_clause = f"WHERE {' AND '.join(where)}" if where else ""
-    needs_scoring = (
-        filters.min_churn_probability is not None or filters.max_churn_probability is not None
-    )
+    needs_scoring = filters.min_churn_probability is not None or filters.max_churn_probability is not None
 
     conn = get_pg_conn()
     try:
@@ -167,8 +166,10 @@ def customer_search(
                 rows = cur.fetchall()
                 customers = [_row_to_profile(dict(zip(_DISPLAY_COLUMNS, r, strict=False))) for r in rows]
                 return CustomerSearchResult(
-                    customers=customers, total_matched=total_matched,
-                    limit=limit, offset=offset,
+                    customers=customers,
+                    total_matched=total_matched,
+                    limit=limit,
+                    offset=offset,
                     truncated=(offset + len(customers)) < total_matched,
                 )
 
@@ -202,10 +203,12 @@ def customer_search(
         df = df[df["_churn_probability"] <= filters.max_churn_probability]
 
     total_matched = len(df)
-    page = df.iloc[offset: offset + limit]
+    page = df.iloc[offset : offset + limit]
     customers = [_row_to_profile(row.to_dict()) for _, row in page.iterrows()]
     return CustomerSearchResult(
-        customers=customers, total_matched=total_matched,
-        limit=limit, offset=offset,
+        customers=customers,
+        total_matched=total_matched,
+        limit=limit,
+        offset=offset,
         truncated=(offset + len(customers)) < total_matched or len(rows) == prefilter_cap,
     )

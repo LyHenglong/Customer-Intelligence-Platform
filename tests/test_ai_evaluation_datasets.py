@@ -46,9 +46,7 @@ def test_every_question_has_nonempty_text():
 def test_rag_questions_reference_a_real_knowledge_document():
     from src.ai.rag.ingest import KNOWLEDGE_DIR, discover_documents
 
-    real_doc_ids = {
-        str(p.relative_to(KNOWLEDGE_DIR)).replace("\\", "/") for p in discover_documents()
-    }
+    real_doc_ids = {str(p.relative_to(KNOWLEDGE_DIR)).replace("\\", "/") for p in discover_documents()}
     rag_questions = [q for q in load_benchmark_dataset() if q.expected_route == "RAG_SEARCH"]
     assert rag_questions  # sanity: the filter itself isn't accidentally empty
     for q in rag_questions:

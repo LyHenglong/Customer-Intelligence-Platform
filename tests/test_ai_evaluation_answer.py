@@ -116,6 +116,12 @@ def test_score_response_returns_all_expected_keys():
     assert scores["id"] == "Q1"
     assert scores["route_correct"] is True
     assert set(scores) >= {
-        "tool_selection_accuracy", "citation_correctness", "unsupported_claim_rate",
-        "faithfulness", "answer_relevancy", "context_precision", "context_recall", "latency_ms",
+        "tool_selection_accuracy",
+        "citation_correctness",
+        "unsupported_claim_rate",
+        "faithfulness",
+        "answer_relevancy",
+        "context_precision",
+        "context_recall",
+        "latency_ms",
     }

@@ -179,7 +179,9 @@ def test_explain_churn_calls_complete_with_grounded_prompt(monkeypatch):
     def fake_complete(system_prompt, user_prompt, **kwargs):
         captured["system"] = system_prompt
         captured["user"] = user_prompt
-        return AgentResponse(text="Flagged due to complaints and short tenure.", prompt_tokens=5, completion_tokens=8, model="x")
+        return AgentResponse(
+            text="Flagged due to complaints and short tenure.", prompt_tokens=5, completion_tokens=8, model="x"
+        )
 
     monkeypatch.setattr(explanation_agent, "complete", fake_complete)
     result = explanation_agent.explain_churn(0.65, SAMPLE_SHAP_DETAILS)
@@ -198,6 +200,7 @@ def test_explain_churn_propagates_agent_call_failed(monkeypatch):
     """Callers (dashboard, API) are documented to catch AgentCallFailed
     and fall back to raw SHAP text - this only works if the agent
     actually lets the exception through rather than swallowing it."""
+
     def failing_complete(*args, **kwargs):
         raise AgentCallFailed("groq down")
 
@@ -235,7 +238,9 @@ def test_draft_outreach_returns_response_that_mentions_service(monkeypatch):
     def fake_complete(system_prompt, user_prompt, **kwargs):
         return AgentResponse(
             text="We noticed you might enjoy our Streaming Tv service - take a look!",
-            prompt_tokens=5, completion_tokens=12, model="x",
+            prompt_tokens=5,
+            completion_tokens=12,
+            model="x",
         )
 
     monkeypatch.setattr(outreach_agent, "complete", fake_complete)
@@ -247,6 +252,7 @@ def test_draft_outreach_warns_when_service_not_mentioned(monkeypatch, caplog):
     """The hallucination guard: if the model ignores the instruction to
     name the service, this must be detectable (logged), not silently
     accepted as if the draft were grounded."""
+
     def fake_complete(system_prompt, user_prompt, **kwargs):
         return AgentResponse(text="Thanks for being a great customer!", prompt_tokens=5, completion_tokens=8, model="x")
 
@@ -277,12 +283,18 @@ def test_draft_outreach_propagates_agent_call_failed(monkeypatch):
 # --------------------------------------------------------------------------
 
 CURRENT_METRICS = {
-    "version": "20260910T124230Z", "precision_churn": 0.16, "recall_churn": 0.60,
-    "f1_churn": 0.2528, "roc_auc": 0.6693,
+    "version": "20260910T124230Z",
+    "precision_churn": 0.16,
+    "recall_churn": 0.60,
+    "f1_churn": 0.2528,
+    "roc_auc": 0.6693,
 }
 PREVIOUS_METRICS = {
-    "version": "20260909T163041Z", "precision_churn": 0.146, "recall_churn": 0.649,
-    "f1_churn": 0.2350, "roc_auc": 0.6519,
+    "version": "20260909T163041Z",
+    "precision_churn": 0.146,
+    "recall_churn": 0.649,
+    "f1_churn": 0.2350,
+    "roc_auc": 0.6519,
 }
 DRIFT_SUMMARY_NO_DRIFT = {"max_psi": 0.0006, "drift_detected": False, "drifted_features": []}
 DRIFT_SUMMARY_WITH_DRIFT = {"max_psi": 0.31, "drift_detected": True, "drifted_features": ["monthlycharges"]}
@@ -329,6 +341,7 @@ def test_summarize_retrain_raises_on_no_current_metrics():
 def test_summarize_retrain_propagates_agent_call_failed(monkeypatch):
     """The DAG task is documented to catch this and fall back to writing
     the raw metrics dict - only works if this doesn't swallow it first."""
+
     def failing_complete(*args, **kwargs):
         raise AgentCallFailed("groq down")
 

@@ -9,7 +9,9 @@ from src.ai.schemas import AssistantResponse, BenchmarkQuestion
 
 
 def _question(id_, route="ML_ANALYSIS"):
-    return BenchmarkQuestion(id=id_, question=f"question {id_}", expected_route=route, expected_tools=["churn_analysis"])
+    return BenchmarkQuestion(
+        id=id_, question=f"question {id_}", expected_route=route, expected_tools=["churn_analysis"]
+    )
 
 
 def test_run_benchmark_scores_every_question(monkeypatch):
@@ -17,7 +19,11 @@ def test_run_benchmark_scores_every_question(monkeypatch):
 
     def _fake_run_query(query):
         return AssistantResponse(
-            answer="ok", route="ML_ANALYSIS", trace_id="t", tools_used=["churn_analysis"], latency_ms=10.0,
+            answer="ok",
+            route="ML_ANALYSIS",
+            trace_id="t",
+            tools_used=["churn_analysis"],
+            latency_ms=10.0,
         )
 
     monkeypatch.setattr(benchmark_module, "run_query", _fake_run_query)
@@ -47,7 +53,8 @@ def test_run_benchmark_scores_a_raised_exception_as_a_full_failure(monkeypatch):
 def test_run_benchmark_respects_limit(monkeypatch):
     questions = [_question(f"Q{i}") for i in range(10)]
     monkeypatch.setattr(
-        benchmark_module, "run_query",
+        benchmark_module,
+        "run_query",
         lambda query: AssistantResponse(answer="ok", route="ML_ANALYSIS", trace_id="t", latency_ms=1.0),
     )
 
@@ -62,9 +69,18 @@ def test_summarize_empty_scores():
 
 def test_summarize_computes_median_and_p95_latency():
     scores = [
-        {"id": f"Q{i}", "route_correct": True, "tool_selection_accuracy": 1.0,
-         "citation_correctness": 1.0, "unsupported_claim_rate": 0.0, "faithfulness": 1.0,
-         "answer_relevancy": 1.0, "context_precision": 1.0, "context_recall": 1.0, "latency_ms": float(i)}
+        {
+            "id": f"Q{i}",
+            "route_correct": True,
+            "tool_selection_accuracy": 1.0,
+            "citation_correctness": 1.0,
+            "unsupported_claim_rate": 0.0,
+            "faithfulness": 1.0,
+            "answer_relevancy": 1.0,
+            "context_precision": 1.0,
+            "context_recall": 1.0,
+            "latency_ms": float(i),
+        }
         for i in range(1, 21)  # latencies 1..20
     ]
     summary = benchmark_module.summarize(scores, total_elapsed_s=5.0)
@@ -80,9 +96,20 @@ def test_print_report_handles_zero_queries(capsys):
 
 def test_print_report_prints_key_metrics(capsys):
     summary = benchmark_module.summarize(
-        [{"id": "Q1", "route_correct": True, "tool_selection_accuracy": 0.9,
-          "citation_correctness": 1.0, "unsupported_claim_rate": 0.1, "faithfulness": 0.9,
-          "answer_relevancy": 0.8, "context_precision": 1.0, "context_recall": 1.0, "latency_ms": 50.0}],
+        [
+            {
+                "id": "Q1",
+                "route_correct": True,
+                "tool_selection_accuracy": 0.9,
+                "citation_correctness": 1.0,
+                "unsupported_claim_rate": 0.1,
+                "faithfulness": 0.9,
+                "answer_relevancy": 0.8,
+                "context_precision": 1.0,
+                "context_recall": 1.0,
+                "latency_ms": 50.0,
+            }
+        ],
         total_elapsed_s=1.0,
     )
     benchmark_module.print_report(summary)

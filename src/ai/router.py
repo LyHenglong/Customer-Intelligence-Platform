@@ -25,18 +25,49 @@ UNSUPPORTED = "UNSUPPORTED"
 _CUSTOMER_ID_RE = re.compile(r"\bCUST\d{3,}\b", re.IGNORECASE)
 
 _SQL_KEYWORDS = (
-    "how many", "average", "avg", "count", "rate", "compare", "comparison",
-    "which customers", "segment", "breakdown", "group by", "total", "revenue",
+    "how many",
+    "average",
+    "avg",
+    "count",
+    "rate",
+    "compare",
+    "comparison",
+    "which customers",
+    "segment",
+    "breakdown",
+    "group by",
+    "total",
+    "revenue",
 )
 _ML_KEYWORDS = (
-    "churn probability", "risk factor", "risk factors", "shap", "why is", "why did",
-    "predicted", "at risk", "explain why", "risky", "likely to churn",
-    "recommend", "recommendation",
+    "churn probability",
+    "risk factor",
+    "risk factors",
+    "shap",
+    "why is",
+    "why did",
+    "predicted",
+    "at risk",
+    "explain why",
+    "risky",
+    "likely to churn",
+    "recommend",
+    "recommendation",
 )
 _RAG_KEYWORDS = (
-    "policy", "policies", "playbook", "guidance", "documentation", "document",
-    "what does", "according to", "procedure", "escalation", "offer cost",
-    "retention strategy", "support tier",
+    "policy",
+    "policies",
+    "playbook",
+    "guidance",
+    "documentation",
+    "document",
+    "what does",
+    "according to",
+    "procedure",
+    "escalation",
+    "offer cost",
+    "retention strategy",
+    "support tier",
 )
 
 # Natural-language phrasings -> the warehouse values churn_analysis accepts

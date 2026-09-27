@@ -35,25 +35,55 @@ log = logging.getLogger("batch_loader")
 RAW_DIR = Path(__file__).resolve().parents[2] / "data" / "raw"
 
 RAW_COLUMNS = [
-    "customer_id", "signup_date", "age", "gender", "annual_income", "education",
-    "marital_status", "dependents", "tenure", "contract", "payment_method",
-    "paperless_billing", "senior_citizen", "monthlycharges", "totalcharges",
-    "num_services", "has_phone_service", "has_internet_service",
-    "has_online_security", "has_online_backup", "has_device_protection",
-    "has_tech_support", "has_streaming_tv", "has_streaming_movies",
-    "customer_satisfaction", "num_complaints", "num_service_calls",
-    "late_payments", "avg_monthly_gb", "days_since_last_interaction",
-    "credit_score", "churn",
+    "customer_id",
+    "signup_date",
+    "age",
+    "gender",
+    "annual_income",
+    "education",
+    "marital_status",
+    "dependents",
+    "tenure",
+    "contract",
+    "payment_method",
+    "paperless_billing",
+    "senior_citizen",
+    "monthlycharges",
+    "totalcharges",
+    "num_services",
+    "has_phone_service",
+    "has_internet_service",
+    "has_online_security",
+    "has_online_backup",
+    "has_device_protection",
+    "has_tech_support",
+    "has_streaming_tv",
+    "has_streaming_movies",
+    "customer_satisfaction",
+    "num_complaints",
+    "num_service_calls",
+    "late_payments",
+    "avg_monthly_gb",
+    "days_since_last_interaction",
+    "credit_score",
+    "churn",
 ]
 
 CLEANED_COLUMNS = RAW_COLUMNS + [
-    "tenure_years", "total_active_services", "avg_gb_per_service",
+    "tenure_years",
+    "total_active_services",
+    "avg_gb_per_service",
 ]
 
 _SERVICE_FLAGS = [
-    "has_phone_service", "has_internet_service", "has_online_security",
-    "has_online_backup", "has_device_protection", "has_tech_support",
-    "has_streaming_tv", "has_streaming_movies",
+    "has_phone_service",
+    "has_internet_service",
+    "has_online_security",
+    "has_online_backup",
+    "has_device_protection",
+    "has_tech_support",
+    "has_streaming_tv",
+    "has_streaming_movies",
 ]
 
 
@@ -215,7 +245,9 @@ def load_batch(batch_path: Path, skip_raw: bool = False) -> None:
     raw_rows, cleaned_rows, stats = process_batch(batch_path)
     log.info(
         "  total_rows=%d invalid_dropped=%d loaded_rows=%d",
-        stats["total_rows"], stats["invalid_rows_dropped"], stats["loaded_rows"],
+        stats["total_rows"],
+        stats["invalid_rows_dropped"],
+        stats["loaded_rows"],
     )
 
     conn = get_pg_conn()
@@ -242,10 +274,11 @@ def main() -> None:
     parser.add_argument("--batch", help="Explicit batch filename (e.g. batch_001.csv)")
     parser.add_argument("--all", action="store_true", help="Process all remaining unprocessed batches")
     parser.add_argument(
-        "--skip-raw", action="store_true",
+        "--skip-raw",
+        action="store_true",
         help="Don't write the raw_customers pass-through table (only customers_cleaned). "
-             "Useful for storage-capped hosts like Neon's free tier - raw_customers is an "
-             "audit copy not read by training/RAG/dashboard code.",
+        "Useful for storage-capped hosts like Neon's free tier - raw_customers is an "
+        "audit copy not read by training/RAG/dashboard code.",
     )
     args = parser.parse_args()
 

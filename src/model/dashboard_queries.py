@@ -33,9 +33,20 @@ TOTAL_SIMULATED_BATCHES = 13
 
 # signup_date deliberately excluded: not used anywhere downstream, and
 # pulling a raw timestamp for 300K+ rows for nothing is pure memory waste.
-_DASHBOARD_COLUMNS = [c for c in ["customer_id"] + CHURN_FEATURES + [
-    "churn", "contract", "tenure", "monthlycharges", "tenure_bucket", "total_active_services",
-] if c != "signup_date"]
+_DASHBOARD_COLUMNS = [
+    c
+    for c in ["customer_id"]
+    + CHURN_FEATURES
+    + [
+        "churn",
+        "contract",
+        "tenure",
+        "monthlycharges",
+        "tenure_bucket",
+        "total_active_services",
+    ]
+    if c != "signup_date"
+]
 _DASHBOARD_COLUMNS = list(dict.fromkeys(_DASHBOARD_COLUMNS))  # de-dupe, keep order
 
 
@@ -101,12 +112,14 @@ def score_all_customers(_churn_artifact, churn_version: str, batch_size: int = 2
         transform=_score_batch,
     )
 
-    frame = pd.DataFrame({
-        "customer_id": np.concatenate(ids),
-        "churn_probability": np.concatenate(scores),
-        "monthlycharges": np.concatenate(charges),
-        "churn": np.concatenate(labels),
-    })
+    frame = pd.DataFrame(
+        {
+            "customer_id": np.concatenate(ids),
+            "churn_probability": np.concatenate(scores),
+            "monthlycharges": np.concatenate(charges),
+            "churn": np.concatenate(labels),
+        }
+    )
     for c in CHURN_CATEGORICAL:
         frame[c] = pd.Categorical(np.concatenate(segments[c]))
     return frame
@@ -178,8 +191,7 @@ def ensure_churn_scores_table() -> None:
                 """
             )
             cur.execute(
-                "CREATE INDEX IF NOT EXISTS idx_churn_scores_model_version "
-                "ON public.churn_scores (model_version)"
+                "CREATE INDEX IF NOT EXISTS idx_churn_scores_model_version ON public.churn_scores (model_version)"
             )
         conn.commit()
     finally:
@@ -207,9 +219,17 @@ def store_scored_customers(frame: pd.DataFrame, churn_version: str) -> None:
             cur.execute("DELETE FROM public.churn_scores WHERE model_version != %s", (churn_version,))
             rows = [
                 (
-                    r.customer_id, churn_version, float(r.churn_probability), float(r.monthlycharges),
-                    int(r.churn), r.gender, r.education, r.marital_status, r.contract,
-                    r.payment_method, r.tenure_bucket,
+                    r.customer_id,
+                    churn_version,
+                    float(r.churn_probability),
+                    float(r.monthlycharges),
+                    int(r.churn),
+                    r.gender,
+                    r.education,
+                    r.marital_status,
+                    r.contract,
+                    r.payment_method,
+                    r.tenure_bucket,
                 )
                 for r in frame.itertuples(index=False)
             ]
@@ -268,8 +288,16 @@ def load_precomputed_scores(churn_version: str) -> pd.DataFrame | None:
         conn.close()
 
     columns = [
-        "customer_id", "churn_probability", "monthlycharges", "churn",
-        "gender", "education", "marital_status", "contract", "payment_method", "tenure_bucket",
+        "customer_id",
+        "churn_probability",
+        "monthlycharges",
+        "churn",
+        "gender",
+        "education",
+        "marital_status",
+        "contract",
+        "payment_method",
+        "tenure_bucket",
     ]
     frame = stream_query(
         f"SELECT {', '.join(columns)} FROM public.churn_scores WHERE model_version = %s",
@@ -306,7 +334,11 @@ def peek_scored_customers(churn_version: str) -> pd.DataFrame | None:
     multi-minute scoring pass."""
     with _scored_lock:
         cached = _scored_cache
-        if cached["data"] is not None and cached["version"] == churn_version and time.monotonic() < cached["expires_at"]:
+        if (
+            cached["data"] is not None
+            and cached["version"] == churn_version
+            and time.monotonic() < cached["expires_at"]
+        ):
             return cached["data"]
     return None
 
@@ -360,8 +392,7 @@ def load_customers_by_id(customer_ids: tuple[str, ...]) -> pd.DataFrame:
     try:
         with conn.cursor() as cur:
             cur.execute(
-                f"SELECT {', '.join(_DASHBOARD_COLUMNS)} FROM marts.customer_360 "
-                f"WHERE customer_id = ANY(%s)",
+                f"SELECT {', '.join(_DASHBOARD_COLUMNS)} FROM marts.customer_360 WHERE customer_id = ANY(%s)",
                 (list(customer_ids),),
             )
             rows = cur.fetchall()
@@ -470,9 +501,9 @@ def column_importances(pipeline) -> dict:
     grouped: dict[str, float] = {}
     for name, imp in zip(names, raw_importances, strict=False):
         if name.startswith("num__"):
-            col = name[len("num__"):]
+            col = name[len("num__") :]
         elif name.startswith("cat__"):
-            rest = name[len("cat__"):]
+            rest = name[len("cat__") :]
             col = next((c for c in CHURN_CATEGORICAL if rest.startswith(c + "_")), rest)
         else:
             col = name

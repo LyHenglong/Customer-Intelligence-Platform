@@ -109,10 +109,14 @@ class _FakeCursor:
             dim = m.group(1)
             rows = []
             for key, g in self.df.groupby(dim):
-                rows.append((
-                    str(key), float(g["churn"].astype(int).mean()),
-                    int(len(g)), float(g["monthlycharges"].mean()),
-                ))
+                rows.append(
+                    (
+                        str(key),
+                        float(g["churn"].astype(int).mean()),
+                        int(len(g)),
+                        float(g["monthlycharges"].mean()),
+                    )
+                )
             rows.sort(key=lambda r: r[0])
             self.description = [(dim,), ("churn_rate",), ("n",), ("avg_charges",)]
             self._rows = rows
@@ -130,7 +134,7 @@ class _FakeCursor:
         elif "LIMIT" in upper:
             limit = rest_params[0]
         if limit is not None:
-            filtered = filtered.iloc[(offset or 0): (offset or 0) + limit]
+            filtered = filtered.iloc[(offset or 0) : (offset or 0) + limit]
 
         self.description = [(c,) for c in cols]
         self._rows = [tuple(row[c] for c in cols) for _, row in filtered.iterrows()]
@@ -165,13 +169,14 @@ def _fake_stream_query(df: pd.DataFrame):
         rows = filtered[columns]
         frames = []
         for start in range(0, len(rows), batch_rows):
-            batch = rows.iloc[start:start + batch_rows].reset_index(drop=True)
+            batch = rows.iloc[start : start + batch_rows].reset_index(drop=True)
             if transform is not None:
                 batch = transform(batch)
             frames.append(batch)
         if not frames:
             return pd.DataFrame(columns=columns)
         return pd.concat(frames, ignore_index=True)
+
     return _run
 
 
@@ -251,9 +256,7 @@ class TestCustomerLookup:
         assert result.found is True
         assert result.profile.customer_id == "CUST0005"
         assert 0.0 <= result.churn_probability <= 1.0
-        assert result.risk_status == (
-            "high" if result.churn_probability >= result.churn_threshold else "low"
-        )
+        assert result.risk_status == ("high" if result.churn_probability >= result.churn_threshold else "low")
         assert len(result.shap_factors) == 5
         assert all(f.feature in ALL_FEATURES for f in result.shap_factors)
         assert result.recommendation, "recommender fast path should return at least one service"
@@ -278,9 +281,7 @@ class TestCustomerSearch:
         monkeypatch.setattr(customer_tool, "get_pg_conn", lambda: _FakeConn(customers_df))
         expected_total = int((customers_df["contract"] == "a").sum())
 
-        result = customer_tool.customer_search(
-            CustomerSearchFilters(contract="a"), limit=3, offset=0
-        )
+        result = customer_tool.customer_search(CustomerSearchFilters(contract="a"), limit=3, offset=0)
 
         assert result.total_matched == expected_total
         assert len(result.customers) == min(3, expected_total)
@@ -297,9 +298,7 @@ class TestCustomerSearch:
         from src.ai.tools import customer_tool
 
         monkeypatch.setattr(customer_tool, "get_pg_conn", lambda: _FakeConn(customers_df))
-        result = customer_tool.customer_search(
-            CustomerSearchFilters(min_churn_probability=0.0), limit=5
-        )
+        result = customer_tool.customer_search(CustomerSearchFilters(min_churn_probability=0.0), limit=5)
         assert len(result.customers) <= 5
         assert result.total_matched >= len(result.customers)
 
@@ -455,7 +454,8 @@ class TestRetrainingAnalysis:
         monkeypatch.setattr(retraining_tool, "MODELS_DIR", tmp_path)
         monkeypatch.setattr(retraining_tool, "get_pg_conn", lambda: _FakeConn(pd.DataFrame()))
         monkeypatch.setattr(
-            retraining_tool, "get_latest_retrain_summary",
+            retraining_tool,
+            "get_latest_retrain_summary",
             lambda: {"summary_text": "retrained because of drift"},
         )
 

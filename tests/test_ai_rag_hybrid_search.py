@@ -11,8 +11,11 @@ from src.ai.rag.hybrid_search import RRF_K, rrf_fuse
 
 def _cand(chunk_id, **kw):
     base = {
-        "chunk_id": chunk_id, "document_id": "doc1", "title": "Doc One",
-        "section": None, "text": f"text for {chunk_id}",
+        "chunk_id": chunk_id,
+        "document_id": "doc1",
+        "title": "Doc One",
+        "section": None,
+        "text": f"text for {chunk_id}",
     }
     base.update(kw)
     return base
@@ -52,7 +55,8 @@ class TestHybridSearch:
         monkeypatch.setattr(hs, "vector_search", lambda emb, top_k: [_cand("B"), _cand("C")])
         monkeypatch.setattr(hs, "embed_query", lambda query: [0.0] * 384)
         monkeypatch.setattr(
-            hs, "rerank",
+            hs,
+            "rerank",
             lambda query, candidates, top_k: [
                 {**c, "score": 1.0} for c in sorted(candidates, key=lambda c: c["chunk_id"])[:top_k]
             ],

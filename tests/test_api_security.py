@@ -20,8 +20,14 @@ def _no_real_startup_work(monkeypatch):
 @pytest.fixture
 def canned_assistant(monkeypatch):
     canned = AssistantResponse(
-        answer="ok", citations=[], evidence=[], tools_used=[],
-        model_version="V1", route="GENERAL", trace_id="t", latency_ms=1.0,
+        answer="ok",
+        citations=[],
+        evidence=[],
+        tools_used=[],
+        model_version="V1",
+        route="GENERAL",
+        trace_id="t",
+        latency_ms=1.0,
     )
     monkeypatch.setattr(assistant_router, "ai_run_query", lambda query: canned)
 

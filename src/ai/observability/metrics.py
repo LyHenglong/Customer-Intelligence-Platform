@@ -23,9 +23,7 @@ def compute_metrics(traces: list[dict]) -> dict:
     rag_traces = [t for t in traces if "hybrid_search" in (t.get("tools_used") or [])]
     rag_hits = [t for t in rag_traces if t.get("retrieved_documents")]
 
-    latencies = sorted(
-        t["total_latency_ms"] for t in traces if t.get("total_latency_ms") is not None
-    )
+    latencies = sorted(t["total_latency_ms"] for t in traces if t.get("total_latency_ms") is not None)
     tool_usage = Counter(tool for t in traces for tool in (t.get("tools_used") or []))
 
     input_tokens = sum(t.get("input_tokens") or 0 for t in traces)
@@ -38,9 +36,7 @@ def compute_metrics(traces: list[dict]) -> dict:
         "error_rate": round(len(errored) / n, 4),
         "average_latency_ms": round(sum(latencies) / len(latencies), 2) if latencies else None,
         "p50_latency_ms": round(statistics.median(latencies), 2) if latencies else None,
-        "p95_latency_ms": (
-            round(latencies[max(0, int(len(latencies) * 0.95) - 1)], 2) if latencies else None
-        ),
+        "p95_latency_ms": (round(latencies[max(0, int(len(latencies) * 0.95) - 1)], 2) if latencies else None),
         "tool_usage": dict(tool_usage),
         "retrieval_hit_rate": round(len(rag_hits) / len(rag_traces), 4) if rag_traces else None,
         "fallback_rate": round(len(fallback) / n, 4),

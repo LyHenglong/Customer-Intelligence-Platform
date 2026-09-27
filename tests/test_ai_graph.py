@@ -80,9 +80,12 @@ class TestUnsupportedRoute:
 class TestCustomerLookupRoute:
     def test_found_customer_builds_evidence_and_generates_answer(self, monkeypatch):
         looked_up = CustomerLookupResult(
-            customer_id="CUST000123", found=True,
+            customer_id="CUST000123",
+            found=True,
             profile=CustomerProfile(customer_id="CUST000123", contract="month_to_month"),
-            churn_probability=0.42, churn_threshold=0.3, risk_status="high",
+            churn_probability=0.42,
+            churn_threshold=0.3,
+            risk_status="high",
             model_version="V1",
             shap_factors=[ShapFactor(feature="num_complaints", shap_value=0.2, direction="increases risk")],
             recommendation=[Recommendation(service="has_tech_support", score=0.9)],
@@ -102,7 +105,9 @@ class TestCustomerLookupRoute:
         assert len(fake.calls) == 1  # only the generation call, no SQL generation on this route
 
     def test_unknown_customer_short_circuits_before_any_llm_call(self, monkeypatch):
-        monkeypatch.setattr(graph_module, "customer_lookup", lambda cid: CustomerLookupResult(customer_id=cid, found=False))
+        monkeypatch.setattr(
+            graph_module, "customer_lookup", lambda cid: CustomerLookupResult(customer_id=cid, found=False)
+        )
         monkeypatch.setattr(graph_module, "get_llm_provider", _no_llm_allowed)
 
         result = graph_module.run_query("Show customer CUST000999")
@@ -114,17 +119,27 @@ class TestCustomerLookupRoute:
 
 class TestSQLAnalysisRoute:
     def test_generated_sql_with_rows_becomes_evidence(self, monkeypatch):
-        monkeypatch.setattr(graph_module, "run_sql", lambda q: SQLQueryResult(
-            sql=q, columns=["contract", "churn_rate"], rows=[["month_to_month", 30]],
-            row_count=1, truncated=False, execution_time_ms=1.0,
-        ))
-        fake = _FakeProvider(responses=[
-            "SELECT contract, AVG(churn) FROM marts.customer_360 GROUP BY contract LIMIT 10",
-            # "30" (not "0.3"/"30%") so it text-matches the evidence's str(rows)
-            # verbatim - the grounding guardrail (src/ai/guardrails/grounding.py)
-            # does exact-text number matching, not unit-aware equivalence.
-            "Month-to-month customers churn at a rate of 30.",
-        ])
+        monkeypatch.setattr(
+            graph_module,
+            "run_sql",
+            lambda q: SQLQueryResult(
+                sql=q,
+                columns=["contract", "churn_rate"],
+                rows=[["month_to_month", 30]],
+                row_count=1,
+                truncated=False,
+                execution_time_ms=1.0,
+            ),
+        )
+        fake = _FakeProvider(
+            responses=[
+                "SELECT contract, AVG(churn) FROM marts.customer_360 GROUP BY contract LIMIT 10",
+                # "30" (not "0.3"/"30%") so it text-matches the evidence's str(rows)
+                # verbatim - the grounding guardrail (src/ai/guardrails/grounding.py)
+                # does exact-text number matching, not unit-aware equivalence.
+                "Month-to-month customers churn at a rate of 30.",
+            ]
+        )
         monkeypatch.setattr(graph_module, "get_llm_provider", lambda: fake)
 
         result = graph_module.run_query("What is the average churn rate by contract?")
@@ -151,11 +166,20 @@ class TestSQLAnalysisRoute:
 
 class TestMLAnalysisRoute:
     def test_population_stats_become_evidence(self, monkeypatch):
-        monkeypatch.setattr(graph_module, "churn_analysis", lambda filters=None: ChurnAnalysisResult(
-            population_size=1000, current_churn_rate=0.1, predicted_high_risk_count=120,
-            mean_churn_probability=0.15, median_churn_probability=0.12,
-            model_version="V2", threshold=0.11, filters_applied={},
-        ))
+        monkeypatch.setattr(
+            graph_module,
+            "churn_analysis",
+            lambda filters=None: ChurnAnalysisResult(
+                population_size=1000,
+                current_churn_rate=0.1,
+                predicted_high_risk_count=120,
+                mean_churn_probability=0.15,
+                median_churn_probability=0.12,
+                model_version="V2",
+                threshold=0.11,
+                filters_applied={},
+            ),
+        )
         fake = _FakeProvider(responses=["Churn risk is concentrated among a subset of customers."])
         monkeypatch.setattr(graph_module, "get_llm_provider", lambda: fake)
 
@@ -174,17 +198,28 @@ class TestMLAnalysisRoute:
         this they were never handed to the assistant, so "what are the
         biggest risk factors" got aggregate rates and an honest "the
         evidence names no drivers"."""
-        monkeypatch.setattr(graph_module, "churn_analysis", lambda filters=None: ChurnAnalysisResult(
-            population_size=1000, current_churn_rate=0.1, predicted_high_risk_count=120,
-            mean_churn_probability=0.15, median_churn_probability=0.12,
-            model_version="V2", threshold=0.11, filters_applied={},
-        ))
         monkeypatch.setattr(
-            graph_module, "load_churn_artifact",
+            graph_module,
+            "churn_analysis",
+            lambda filters=None: ChurnAnalysisResult(
+                population_size=1000,
+                current_churn_rate=0.1,
+                predicted_high_risk_count=120,
+                mean_churn_probability=0.15,
+                median_churn_probability=0.12,
+                model_version="V2",
+                threshold=0.11,
+                filters_applied={},
+            ),
+        )
+        monkeypatch.setattr(
+            graph_module,
+            "load_churn_artifact",
             lambda: ({"pipeline": object()}, "V2"),
         )
         monkeypatch.setattr(
-            graph_module, "column_importances",
+            graph_module,
+            "column_importances",
             lambda pipeline: {"contract": 0.40, "tenure": 0.25, "num_complaints": 0.10},
         )
         fake = _FakeProvider(responses=["Contract type and tenure matter most."])
@@ -198,10 +233,7 @@ class TestMLAnalysisRoute:
         # Ranked most-important-first and expressed as a share of total,
         # not the raw split counts column_importances returns: 0.40 of
         # (0.40 + 0.25 + 0.10) is 53.3%.
-        assert importance_evidence[0].value.startswith(
-            "contract (53.3% of total model importance)"
-        )
-
+        assert importance_evidence[0].value.startswith("contract (53.3% of total model importance)")
 
     def test_feature_importances_are_skipped_when_the_model_reports_none(self, monkeypatch):
         monkeypatch.setattr(graph_module, "load_churn_artifact", lambda: ({"pipeline": object()}, "V2"))
@@ -209,11 +241,20 @@ class TestMLAnalysisRoute:
         assert graph_module._gather_feature_importance_evidence() == []
 
     def test_counting_questions_skip_feature_importances(self, monkeypatch):
-        monkeypatch.setattr(graph_module, "churn_analysis", lambda filters=None: ChurnAnalysisResult(
-            population_size=1000, current_churn_rate=0.1, predicted_high_risk_count=120,
-            mean_churn_probability=0.15, median_churn_probability=0.12,
-            model_version="V2", threshold=0.11, filters_applied={},
-        ))
+        monkeypatch.setattr(
+            graph_module,
+            "churn_analysis",
+            lambda filters=None: ChurnAnalysisResult(
+                population_size=1000,
+                current_churn_rate=0.1,
+                predicted_high_risk_count=120,
+                mean_churn_probability=0.15,
+                median_churn_probability=0.12,
+                model_version="V2",
+                threshold=0.11,
+                filters_applied={},
+            ),
+        )
         monkeypatch.setattr(graph_module, "get_llm_provider", lambda: _FakeProvider(responses=["120 are at risk."]))
 
         result = graph_module.run_query("how many customers are predicted at risk")
@@ -221,11 +262,20 @@ class TestMLAnalysisRoute:
         assert "feature_importances" not in result.tools_used
 
     def test_empty_population_yields_insufficient_evidence(self, monkeypatch):
-        monkeypatch.setattr(graph_module, "churn_analysis", lambda filters=None: ChurnAnalysisResult(
-            population_size=0, current_churn_rate=0.0, predicted_high_risk_count=0,
-            mean_churn_probability=0.0, median_churn_probability=0.0,
-            model_version=None, threshold=0.0, filters_applied={},
-        ))
+        monkeypatch.setattr(
+            graph_module,
+            "churn_analysis",
+            lambda filters=None: ChurnAnalysisResult(
+                population_size=0,
+                current_churn_rate=0.0,
+                predicted_high_risk_count=0,
+                mean_churn_probability=0.0,
+                median_churn_probability=0.0,
+                model_version=None,
+                threshold=0.0,
+                filters_applied={},
+            ),
+        )
         monkeypatch.setattr(graph_module, "get_llm_provider", _no_llm_allowed)
 
         result = graph_module.run_query("What are the biggest risk factors for churn?")
@@ -234,14 +284,22 @@ class TestMLAnalysisRoute:
 
 class TestRagSearchRoute:
     def test_retrieved_passages_become_evidence_with_section_citations(self, monkeypatch):
-        monkeypatch.setattr(graph_module, "hybrid_search", lambda query, top_k_final=3: [
-            RetrievalCandidate(
-                document_id="retention/retention_playbook.md", chunk_id="c1",
-                text="High risk, month-to-month customers get a contract-conversion offer.",
-                title="Retention Playbook", section="Risk Tiers", score=0.9, rank=1,
-                retrieval_method="hybrid_reranked",
-            ),
-        ])
+        monkeypatch.setattr(
+            graph_module,
+            "hybrid_search",
+            lambda query, top_k_final=3: [
+                RetrievalCandidate(
+                    document_id="retention/retention_playbook.md",
+                    chunk_id="c1",
+                    text="High risk, month-to-month customers get a contract-conversion offer.",
+                    title="Retention Playbook",
+                    section="Risk Tiers",
+                    score=0.9,
+                    rank=1,
+                    retrieval_method="hybrid_reranked",
+                ),
+            ],
+        )
         fake = _FakeProvider(responses=["Month-to-month customers are offered a contract conversion."])
         monkeypatch.setattr(graph_module, "get_llm_provider", lambda: fake)
 
@@ -255,24 +313,38 @@ class TestRagSearchRoute:
 
 class TestMultiSourceRoute:
     def test_combines_evidence_from_multiple_tools(self, monkeypatch):
-        monkeypatch.setattr(graph_module, "run_sql", lambda q: SQLQueryResult(
-            sql=q, columns=["contract"], rows=[["month_to_month"]], row_count=1,
-            truncated=False, execution_time_ms=1.0,
-        ))
-        monkeypatch.setattr(graph_module, "hybrid_search", lambda query, top_k_final=3: [
-            RetrievalCandidate(
-                document_id="policies/discount_and_offer_policy.md", chunk_id="c1",
-                text="Standard offers can be approved by any team member.",
-                title="Discount and Offer Policy", section=None, score=0.8, rank=1,
-                retrieval_method="hybrid_reranked",
+        monkeypatch.setattr(
+            graph_module,
+            "run_sql",
+            lambda q: SQLQueryResult(
+                sql=q,
+                columns=["contract"],
+                rows=[["month_to_month"]],
+                row_count=1,
+                truncated=False,
+                execution_time_ms=1.0,
             ),
-        ])
+        )
+        monkeypatch.setattr(
+            graph_module,
+            "hybrid_search",
+            lambda query, top_k_final=3: [
+                RetrievalCandidate(
+                    document_id="policies/discount_and_offer_policy.md",
+                    chunk_id="c1",
+                    text="Standard offers can be approved by any team member.",
+                    title="Discount and Offer Policy",
+                    section=None,
+                    score=0.8,
+                    rank=1,
+                    retrieval_method="hybrid_reranked",
+                ),
+            ],
+        )
         fake = _FakeProvider(responses=["SELECT contract FROM marts.customer_360 LIMIT 10", "Combined answer."])
         monkeypatch.setattr(graph_module, "get_llm_provider", lambda: fake)
 
-        result = graph_module.run_query(
-            "Compare churn rate by contract to what our retention policy says"
-        )
+        result = graph_module.run_query("Compare churn rate by contract to what our retention policy says")
 
         assert result.route == "MULTI_SOURCE"
         assert set(result.tools_used) == {"sql_tool", "hybrid_search"}
@@ -281,11 +353,20 @@ class TestMultiSourceRoute:
 
 class TestGenerationFallback:
     def test_llm_failure_falls_back_to_a_templated_evidence_summary(self, monkeypatch):
-        monkeypatch.setattr(graph_module, "churn_analysis", lambda filters=None: ChurnAnalysisResult(
-            population_size=1000, current_churn_rate=0.1, predicted_high_risk_count=120,
-            mean_churn_probability=0.15, median_churn_probability=0.12,
-            model_version="V2", threshold=0.11, filters_applied={},
-        ))
+        monkeypatch.setattr(
+            graph_module,
+            "churn_analysis",
+            lambda filters=None: ChurnAnalysisResult(
+                population_size=1000,
+                current_churn_rate=0.1,
+                predicted_high_risk_count=120,
+                mean_churn_probability=0.15,
+                median_churn_probability=0.12,
+                model_version="V2",
+                threshold=0.11,
+                filters_applied={},
+            ),
+        )
         monkeypatch.setattr(graph_module, "get_llm_provider", lambda: _FakeProvider(raise_on_call=True))
 
         result = graph_module.run_query("What are the biggest risk factors for churn?")
@@ -306,7 +387,9 @@ class TestTracing:
         assert trace["fallback_status"] is False
 
     def test_insufficient_evidence_writes_a_trace_with_no_llm_usage(self, monkeypatch, captured_traces):
-        monkeypatch.setattr(graph_module, "customer_lookup", lambda cid: CustomerLookupResult(customer_id=cid, found=False))
+        monkeypatch.setattr(
+            graph_module, "customer_lookup", lambda cid: CustomerLookupResult(customer_id=cid, found=False)
+        )
 
         graph_module.run_query("Show customer CUST000999")
 
@@ -317,11 +400,20 @@ class TestTracing:
         assert trace["output_tokens"] == 0
 
     def test_grounded_answer_records_tool_latency_tokens_and_model(self, monkeypatch, captured_traces):
-        monkeypatch.setattr(graph_module, "churn_analysis", lambda filters=None: ChurnAnalysisResult(
-            population_size=1000, current_churn_rate=0.1, predicted_high_risk_count=120,
-            mean_churn_probability=0.15, median_churn_probability=0.12,
-            model_version="V2", threshold=0.11, filters_applied={},
-        ))
+        monkeypatch.setattr(
+            graph_module,
+            "churn_analysis",
+            lambda filters=None: ChurnAnalysisResult(
+                population_size=1000,
+                current_churn_rate=0.1,
+                predicted_high_risk_count=120,
+                mean_churn_probability=0.15,
+                median_churn_probability=0.12,
+                model_version="V2",
+                threshold=0.11,
+                filters_applied={},
+            ),
+        )
         fake = _FakeProvider(responses=["Churn risk is concentrated among a subset of customers."])
         monkeypatch.setattr(graph_module, "get_llm_provider", lambda: fake)
 
@@ -338,11 +430,20 @@ class TestTracing:
         assert trace["error"] is None
 
     def test_ungrounded_answer_marks_fallback_in_the_trace(self, monkeypatch, captured_traces):
-        monkeypatch.setattr(graph_module, "churn_analysis", lambda filters=None: ChurnAnalysisResult(
-            population_size=1000, current_churn_rate=0.1, predicted_high_risk_count=120,
-            mean_churn_probability=0.15, median_churn_probability=0.12,
-            model_version="V2", threshold=0.11, filters_applied={},
-        ))
+        monkeypatch.setattr(
+            graph_module,
+            "churn_analysis",
+            lambda filters=None: ChurnAnalysisResult(
+                population_size=1000,
+                current_churn_rate=0.1,
+                predicted_high_risk_count=120,
+                mean_churn_probability=0.15,
+                median_churn_probability=0.12,
+                model_version="V2",
+                threshold=0.11,
+                filters_applied={},
+            ),
+        )
         fake = _FakeProvider(responses=["The probability is 999999, way outside anything in evidence."])
         monkeypatch.setattr(graph_module, "get_llm_provider", lambda: fake)
 
@@ -353,11 +454,20 @@ class TestTracing:
         assert trace["fallback_status"] is True
 
     def test_llm_call_failure_marks_fallback_in_the_trace(self, monkeypatch, captured_traces):
-        monkeypatch.setattr(graph_module, "churn_analysis", lambda filters=None: ChurnAnalysisResult(
-            population_size=1000, current_churn_rate=0.1, predicted_high_risk_count=120,
-            mean_churn_probability=0.15, median_churn_probability=0.12,
-            model_version="V2", threshold=0.11, filters_applied={},
-        ))
+        monkeypatch.setattr(
+            graph_module,
+            "churn_analysis",
+            lambda filters=None: ChurnAnalysisResult(
+                population_size=1000,
+                current_churn_rate=0.1,
+                predicted_high_risk_count=120,
+                mean_churn_probability=0.15,
+                median_churn_probability=0.12,
+                model_version="V2",
+                threshold=0.11,
+                filters_applied={},
+            ),
+        )
         monkeypatch.setattr(graph_module, "get_llm_provider", lambda: _FakeProvider(raise_on_call=True))
 
         graph_module.run_query("What are the biggest risk factors for churn?")
@@ -380,10 +490,18 @@ class TestTracing:
         assert "churn_analysis: simulated DB outage" in trace["error"]
 
     def test_sql_result_hashes_the_generated_query_not_the_raw_text(self, monkeypatch, captured_traces):
-        monkeypatch.setattr(graph_module, "run_sql", lambda q: SQLQueryResult(
-            sql=q, columns=["contract"], rows=[["month_to_month"]], row_count=1,
-            truncated=False, execution_time_ms=1.0,
-        ))
+        monkeypatch.setattr(
+            graph_module,
+            "run_sql",
+            lambda q: SQLQueryResult(
+                sql=q,
+                columns=["contract"],
+                rows=[["month_to_month"]],
+                row_count=1,
+                truncated=False,
+                execution_time_ms=1.0,
+            ),
+        )
         fake = _FakeProvider(responses=["SELECT contract FROM marts.customer_360 LIMIT 10", "Answer."])
         monkeypatch.setattr(graph_module, "get_llm_provider", lambda: fake)
 

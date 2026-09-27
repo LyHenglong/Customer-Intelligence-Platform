@@ -33,6 +33,7 @@ def _touch(path: Path) -> Path:
 # No MLflow configured
 # --------------------------------------------------------------------------
 
+
 def test_resolve_falls_back_to_glob_latest_when_tracking_uri_unset(models_dir, monkeypatch):
     monkeypatch.delenv("MLFLOW_TRACKING_URI", raising=False)
     older = _touch(models_dir / "churn_model_20260101T000000Z.joblib")
@@ -75,6 +76,7 @@ def test_telco_benchmark_artifacts_can_never_hijack_the_production_model(models_
 # MLflow configured
 # --------------------------------------------------------------------------
 
+
 def test_resolve_falls_back_to_glob_when_mlflow_client_raises(models_dir, monkeypatch):
     monkeypatch.setenv("MLFLOW_TRACKING_URI", "http://mlflow:5000")
     newer = _touch(models_dir / "churn_model_20260102T000000Z.joblib")
@@ -87,6 +89,7 @@ def test_resolve_falls_back_to_glob_when_mlflow_client_raises(models_dir, monkey
             raise RuntimeError("connection refused")
 
     import mlflow
+
     monkeypatch.setattr(mlflow.tracking, "MlflowClient", RaisingClient)
 
     result = registry.resolve_model_path("churn_model", "churn_model_*.joblib", models_dir=models_dir)
@@ -106,6 +109,7 @@ def test_resolve_falls_back_to_glob_when_champion_file_missing_locally(models_di
             return SimpleNamespace(version="3", tags={"model_file": "churn_model_does_not_exist.joblib"})
 
     import mlflow
+
     monkeypatch.setattr(mlflow.tracking, "MlflowClient", MissingFileClient)
 
     result = registry.resolve_model_path("churn_model", "churn_model_*.joblib", models_dir=models_dir)
@@ -131,6 +135,7 @@ def test_resolve_prefers_champion_over_newer_untagged_artifact(models_dir, monke
             return SimpleNamespace(version="1", tags={"model_file": champion.name})
 
     import mlflow
+
     monkeypatch.setattr(mlflow.tracking, "MlflowClient", ChampionClient)
 
     result = registry.resolve_model_path("churn_model", "churn_model_*.joblib", models_dir=models_dir)

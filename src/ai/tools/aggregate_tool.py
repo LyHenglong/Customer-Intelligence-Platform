@@ -14,8 +14,13 @@ from src.warehouse import get_pg_conn
 # string because column identifiers can't be parameterized, so every
 # permitted value here must be a known-safe column name.
 _ALLOWED_DIMENSIONS = {
-    "contract", "tenure_bucket", "gender", "education",
-    "marital_status", "payment_method", "total_active_services",
+    "contract",
+    "tenure_bucket",
+    "gender",
+    "education",
+    "marital_status",
+    "payment_method",
+    "total_active_services",
 }
 
 
@@ -23,9 +28,7 @@ def aggregate_analysis(dimension: str) -> AggregateResult:
     """Churn rate, customer count, and average monthly charges grouped by
     `dimension`."""
     if dimension not in _ALLOWED_DIMENSIONS:
-        raise ValueError(
-            f"unsupported aggregate dimension {dimension!r}; allowed: {sorted(_ALLOWED_DIMENSIONS)}"
-        )
+        raise ValueError(f"unsupported aggregate dimension {dimension!r}; allowed: {sorted(_ALLOWED_DIMENSIONS)}")
 
     conn = get_pg_conn()
     try:

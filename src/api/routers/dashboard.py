@@ -72,9 +72,7 @@ def overview_stats(threshold: Optional[float] = None):
         model_auc=round(model_auc, 4) if model_auc is not None else None,
         model_version=state.models["churn_version"],
         threshold_used=round(effective_threshold, 4),
-        top_feature_importances=[
-            FeatureImportance(feature=f, importance=round(v, 4)) for f, v in top_importances
-        ],
+        top_feature_importances=[FeatureImportance(feature=f, importance=round(v, 4)) for f, v in top_importances],
     )
 
 
@@ -90,7 +88,9 @@ def overview_segment_rates(column: str):
     return SegmentRatesResponse(
         column=column,
         buckets=[
-            SegmentBucket(key=str(row[column]), churn_rate=round(row["churn_rate"], 4), n_customers=int(row["n_customers"]))
+            SegmentBucket(
+                key=str(row[column]), churn_rate=round(row["churn_rate"], 4), n_customers=int(row["n_customers"])
+            )
             for _, row in df.iterrows()
         ],
     )
@@ -133,12 +133,16 @@ def at_risk(threshold: Optional[float] = None, max_rows: int = 100, offset: int 
     at_risk_all = scored[scored["churn_probability"] >= effective_threshold].sort_values(
         "churn_probability", ascending=False
     )
-    page = at_risk_all.iloc[offset: offset + max_rows]
+    page = at_risk_all.iloc[offset : offset + max_rows]
 
     def _response(customers: list[AtRiskCustomer]) -> AtRiskListResponse:
         return AtRiskListResponse(
-            customers=customers, total_at_risk=int(len(at_risk_all)), threshold=round(effective_threshold, 4),
-            max_rows_used=max_rows, offset=offset, model_version=state.models["churn_version"],
+            customers=customers,
+            total_at_risk=int(len(at_risk_all)),
+            threshold=round(effective_threshold, 4),
+            max_rows_used=max_rows,
+            offset=offset,
+            model_version=state.models["churn_version"],
         )
 
     if page.empty:
@@ -169,15 +173,17 @@ def at_risk(threshold: Optional[float] = None, max_rows: int = 100, offset: int 
             except Exception as exc:
                 log.warning("recommendation failed for %s, omitting: %s", cid, exc)
 
-        customers.append(AtRiskCustomer(
-            customer_id=cid,
-            churn_probability=round(float(scored_row["churn_probability"]), 4),
-            contract=full_row["contract"].iloc[0] if "contract" in full_row else None,
-            tenure=int(full_row["tenure"].iloc[0]) if "tenure" in full_row else None,
-            monthlycharges=float(full_row["monthlycharges"].iloc[0]) if "monthlycharges" in full_row else None,
-            key_risk_factors=shap_details,
-            recommended_action=recommended_action,
-        ))
+        customers.append(
+            AtRiskCustomer(
+                customer_id=cid,
+                churn_probability=round(float(scored_row["churn_probability"]), 4),
+                contract=full_row["contract"].iloc[0] if "contract" in full_row else None,
+                tenure=int(full_row["tenure"].iloc[0]) if "tenure" in full_row else None,
+                monthlycharges=float(full_row["monthlycharges"].iloc[0]) if "monthlycharges" in full_row else None,
+                key_risk_factors=shap_details,
+                recommended_action=recommended_action,
+            )
+        )
 
     return _response(customers)
 

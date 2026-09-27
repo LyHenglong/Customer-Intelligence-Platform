@@ -54,10 +54,14 @@ def test_ingest_rejects_unknown_strategy():
 def test_ingest_deletes_before_upserting_each_document(monkeypatch):
     calls = {"ensure_table": 0, "delete_document": [], "upsert_chunks": [], "reload_bm25": 0}
 
-    monkeypatch.setattr(ingest_module, "ensure_table", lambda: calls.__setitem__("ensure_table", calls["ensure_table"] + 1))
+    monkeypatch.setattr(
+        ingest_module, "ensure_table", lambda: calls.__setitem__("ensure_table", calls["ensure_table"] + 1)
+    )
     monkeypatch.setattr(ingest_module, "delete_document", lambda doc_id: calls["delete_document"].append(doc_id))
     monkeypatch.setattr(ingest_module, "upsert_chunks", lambda rows: calls["upsert_chunks"].append(rows))
-    monkeypatch.setattr(ingest_module, "reload_bm25_index", lambda: calls.__setitem__("reload_bm25", calls["reload_bm25"] + 1))
+    monkeypatch.setattr(
+        ingest_module, "reload_bm25_index", lambda: calls.__setitem__("reload_bm25", calls["reload_bm25"] + 1)
+    )
     monkeypatch.setattr(ingest_module, "embed_texts", lambda texts: [[0.0, 0.0] for _ in texts])
 
     report = ingest_module.ingest(strategy="fixed")
@@ -76,7 +80,14 @@ def test_ingest_deletes_before_upserting_each_document(monkeypatch):
     for rows in calls["upsert_chunks"]:
         for row in rows:
             assert set(row) >= {
-                "chunk_id", "document_id", "title", "source", "section",
-                "page", "text", "metadata", "embedding",
+                "chunk_id",
+                "document_id",
+                "title",
+                "source",
+                "section",
+                "page",
+                "text",
+                "metadata",
+                "embedding",
             }
             assert row["embedding"] == [0.0, 0.0]

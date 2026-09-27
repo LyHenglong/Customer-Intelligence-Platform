@@ -62,7 +62,10 @@ def run_sql(query: str) -> SQLQueryResult:
 
     log.info(
         "AI SQL tool: %.1fms, %d row(s)%s | %s",
-        elapsed_ms, len(rows), " (truncated)" if truncated else "", validated,
+        elapsed_ms,
+        len(rows),
+        " (truncated)" if truncated else "",
+        validated,
     )
 
     return SQLQueryResult(

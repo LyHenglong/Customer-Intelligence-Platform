@@ -68,7 +68,6 @@ default_args = {
     tags=["telecom-churn", "backup"],
 )
 def backup_warehouse():
-
     @task
     def dump_and_prune() -> str:
         import datetime

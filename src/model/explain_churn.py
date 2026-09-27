@@ -33,9 +33,9 @@ def _feature_name_to_column(name: str) -> str:
     """Maps a preprocessor's expanded output name (e.g. 'num__num_complaints',
     'cat__contract_two_year') back to the real customer_360 column name."""
     if name.startswith("num__"):
-        return name[len("num__"):]
+        return name[len("num__") :]
     if name.startswith("cat__"):
-        rest = name[len("cat__"):]
+        rest = name[len("cat__") :]
         return next((c for c in CHURN_CATEGORICAL if rest.startswith(c + "_")), rest)
     return name
 

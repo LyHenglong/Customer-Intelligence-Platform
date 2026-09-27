@@ -45,15 +45,15 @@ def test_reciprocal_rank_is_zero_when_absent():
 def test_hit_at_k_boundary():
     ranked = ["a", "b", "c"]
     assert hit_at_k(ranked, "b", 2) is True
-    assert hit_at_k(ranked, "c", 2) is False   # just outside the cutoff
+    assert hit_at_k(ranked, "c", 2) is False  # just outside the cutoff
     assert hit_at_k(ranked, "c", 3) is True
 
 
 def test_summarize_matches_hand_computed_values():
     records = [
-        {"hit@1": True,  "hit@2": True,  "hit@3": True,  "reciprocal_rank": 1.0, "n_candidates": 4},
-        {"hit@1": False, "hit@2": True,  "hit@3": True,  "reciprocal_rank": 0.5, "n_candidates": 4},
-        {"hit@1": False, "hit@2": False, "hit@3": True,  "reciprocal_rank": 0.25, "n_candidates": 4},
+        {"hit@1": True, "hit@2": True, "hit@3": True, "reciprocal_rank": 1.0, "n_candidates": 4},
+        {"hit@1": False, "hit@2": True, "hit@3": True, "reciprocal_rank": 0.5, "n_candidates": 4},
+        {"hit@1": False, "hit@2": False, "hit@3": True, "reciprocal_rank": 0.25, "n_candidates": 4},
         {"hit@1": False, "hit@2": False, "hit@3": False, "reciprocal_rank": 0.0, "n_candidates": 4},
     ]
     s = summarize(records)
@@ -93,23 +93,27 @@ def test_random_ranker_is_a_permutation():
 def test_neighbors_rank_service_held_by_nearest_neighbours():
     """Service 'c' is held by every neighbour, so it must rank first."""
     #                      a  b  c  d
-    neighbor_services = np.array([
-        [1, 0, 1, 0],
-        [0, 0, 1, 0],
-        [0, 1, 1, 0],
-    ])
+    neighbor_services = np.array(
+        [
+            [1, 0, 1, 0],
+            [0, 0, 1, 0],
+            [0, 1, 1, 0],
+        ]
+    )
     distances = np.array([0.1, 0.2, 0.3])
     ranked = rank_by_neighbors(["b", "c", "d"], neighbor_services, distances, SERVICES)
     assert ranked[0] == "c"
-    assert ranked[-1] == "d"      # held by nobody
+    assert ranked[-1] == "d"  # held by nobody
 
 
 def test_neighbors_rank_weights_closer_neighbours_more():
     """The nearest neighbour holds 'b'; a distant one holds 'd'."""
-    neighbor_services = np.array([
-        [0, 1, 0, 0],   # distance 0.01 - very close
-        [0, 0, 0, 1],   # distance 5.0  - far away
-    ])
+    neighbor_services = np.array(
+        [
+            [0, 1, 0, 0],  # distance 0.01 - very close
+            [0, 0, 0, 1],  # distance 5.0  - far away
+        ]
+    )
     distances = np.array([0.01, 5.0])
     ranked = rank_by_neighbors(["b", "d"], neighbor_services, distances, SERVICES)
     assert ranked[0] == "b"
@@ -123,9 +127,9 @@ def test_leave_one_out_hides_an_owned_service():
     owned = np.array([1, 1, 0, 0])
     masked, held_out, candidates = leave_one_out(owned, rng)
 
-    assert owned[held_out] == 1          # something they actually had
-    assert masked[held_out] == 0         # now hidden
-    assert held_out in candidates        # and therefore rankable
+    assert owned[held_out] == 1  # something they actually had
+    assert masked[held_out] == 0  # now hidden
+    assert held_out in candidates  # and therefore rankable
     assert masked.sum() == owned.sum() - 1
 
 

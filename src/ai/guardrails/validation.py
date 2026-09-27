@@ -34,7 +34,8 @@ def validate_response(response: AssistantResponse) -> AssistantResponse:
     if dropped:
         log.warning(
             "dropped %d citation(s) with no matching evidence (trace_id=%s)",
-            dropped, response.trace_id,
+            dropped,
+            response.trace_id,
         )
 
     unsupported = find_unsupported_numbers(response.answer, response.evidence)
@@ -47,12 +48,16 @@ def validate_response(response: AssistantResponse) -> AssistantResponse:
         log.warning(
             "answer contained number(s) not present in its evidence, falling back to a "
             "templated summary (trace_id=%s): %s | rejected answer: %r",
-            response.trace_id, unsupported, response.answer[:500],
+            response.trace_id,
+            unsupported,
+            response.answer[:500],
         )
-        return response.model_copy(update={
-            "answer": templated_evidence_summary(response.evidence),
-            "citations": citations,
-            "confidence": 0.5,
-        })
+        return response.model_copy(
+            update={
+                "answer": templated_evidence_summary(response.evidence),
+                "citations": citations,
+                "confidence": 0.5,
+            }
+        )
 
     return response.model_copy(update={"citations": citations, "confidence": 1.0})

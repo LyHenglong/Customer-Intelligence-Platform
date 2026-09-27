@@ -34,9 +34,24 @@ class SQLSafetyError(ValueError):
 
 
 _FORBIDDEN_KEYWORDS = (
-    "INSERT", "UPDATE", "DELETE", "DROP", "ALTER", "TRUNCATE", "CREATE",
-    "GRANT", "REVOKE", "COPY", "CALL", "EXECUTE", "MERGE", "VACUUM",
-    "REINDEX", "REFRESH", "LISTEN", "NOTIFY",
+    "INSERT",
+    "UPDATE",
+    "DELETE",
+    "DROP",
+    "ALTER",
+    "TRUNCATE",
+    "CREATE",
+    "GRANT",
+    "REVOKE",
+    "COPY",
+    "CALL",
+    "EXECUTE",
+    "MERGE",
+    "VACUUM",
+    "REINDEX",
+    "REFRESH",
+    "LISTEN",
+    "NOTIFY",
 )
 _FORBIDDEN_RE = re.compile(r"\b(" + "|".join(_FORBIDDEN_KEYWORDS) + r")\b", re.IGNORECASE)
 _SELECT_RE = re.compile(r"^\s*SELECT\b", re.IGNORECASE)
@@ -45,11 +60,22 @@ _SELECT_RE = re.compile(r"^\s*SELECT\b", re.IGNORECASE)
 # server configuration, or render whole tables - none of which an analytics
 # question needs, and several of which would sidestep the table allowlist.
 _FORBIDDEN_FUNCTION_PREFIXES = ("pg_", "lo_", "dblink")
-_FORBIDDEN_FUNCTIONS = frozenset({
-    "set_config", "current_setting", "version", "inet_server_addr", "inet_server_port",
-    "query_to_xml", "query_to_xml_and_xmlschema", "table_to_xml", "cursor_to_xml",
-    "schema_to_xml", "database_to_xml", "txid_current",
-})
+_FORBIDDEN_FUNCTIONS = frozenset(
+    {
+        "set_config",
+        "current_setting",
+        "version",
+        "inet_server_addr",
+        "inet_server_port",
+        "query_to_xml",
+        "query_to_xml_and_xmlschema",
+        "table_to_xml",
+        "cursor_to_xml",
+        "schema_to_xml",
+        "database_to_xml",
+        "txid_current",
+    }
+)
 
 
 def _function_names(tree: exp.Expression) -> set[str]:
@@ -125,8 +151,7 @@ def validate_sql(query: str) -> str:
     disallowed = tables - allowed
     if disallowed:
         raise SQLSafetyError(
-            f"query references table(s) not on the allowlist: {sorted(disallowed)} "
-            f"(allowed: {sorted(allowed)})"
+            f"query references table(s) not on the allowlist: {sorted(disallowed)} (allowed: {sorted(allowed)})"
         )
 
     return body

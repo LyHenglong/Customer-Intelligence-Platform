@@ -41,10 +41,7 @@ Rules:
 
 
 def _format_factors(shap_details: list[dict]) -> str:
-    return "\n".join(
-        f"- {d['feature']}: {d['direction']} (SHAP value {d['shap_value']:+.4f})"
-        for d in shap_details
-    )
+    return "\n".join(f"- {d['feature']}: {d['direction']} (SHAP value {d['shap_value']:+.4f})" for d in shap_details)
 
 
 def build_prompt(churn_probability: float, shap_details: list[dict]) -> str:

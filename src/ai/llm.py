@@ -40,9 +40,7 @@ class GroqProvider:
     def complete(
         self, system_prompt: str, user_prompt: str, max_tokens: int = 500, temperature: float = 0.3
     ) -> AgentResponse:
-        return groq_complete(
-            system_prompt, user_prompt, max_tokens=max_tokens, temperature=temperature
-        )
+        return groq_complete(system_prompt, user_prompt, max_tokens=max_tokens, temperature=temperature)
 
 
 class OpenAICompatibleProvider:

@@ -77,15 +77,26 @@ os.environ.setdefault("MLFLOW_HTTP_REQUEST_MAX_RETRIES", "2")
 MODELS_DIR = Path(__file__).resolve().parents[2] / "models_store"
 
 PROFILE_NUMERIC = [
-    "age", "annual_income", "tenure", "monthlycharges", "totalcharges",
-    "customer_satisfaction", "avg_monthly_gb", "credit_score",
+    "age",
+    "annual_income",
+    "tenure",
+    "monthlycharges",
+    "totalcharges",
+    "customer_satisfaction",
+    "avg_monthly_gb",
+    "credit_score",
 ]
 PROFILE_CATEGORICAL = ["gender", "education", "marital_status", "contract", "payment_method"]
 
 SERVICE_COLUMNS = [
-    "has_phone_service", "has_internet_service", "has_online_security",
-    "has_online_backup", "has_device_protection", "has_tech_support",
-    "has_streaming_tv", "has_streaming_movies",
+    "has_phone_service",
+    "has_internet_service",
+    "has_online_security",
+    "has_online_backup",
+    "has_device_protection",
+    "has_tech_support",
+    "has_streaming_tv",
+    "has_streaming_movies",
 ]
 
 
@@ -165,7 +176,8 @@ def load_customer_360(max_rows: int | None = MAX_REFERENCE_ROWS) -> pd.DataFrame
             sample_clause = f" TABLESAMPLE BERNOULLI ({pct:.4f}) REPEATABLE (42)"
             log.info(
                 "customer_360 has %d rows; sampling ~%d as the reference set (see MAX_REFERENCE_ROWS)",
-                total, max_rows,
+                total,
+                max_rows,
             )
 
     df = stream_query(
@@ -179,18 +191,24 @@ def load_customer_360(max_rows: int | None = MAX_REFERENCE_ROWS) -> pd.DataFrame
 
 
 def build_preprocessor() -> ColumnTransformer:
-    numeric_transformer = Pipeline(steps=[
-        ("impute", SimpleImputer(strategy="median")),
-        ("scale", StandardScaler()),
-    ])
-    categorical_transformer = Pipeline(steps=[
-        ("impute", SimpleImputer(strategy="most_frequent")),
-        ("onehot", OneHotEncoder(handle_unknown="ignore")),
-    ])
-    return ColumnTransformer(transformers=[
-        ("num", numeric_transformer, PROFILE_NUMERIC),
-        ("cat", categorical_transformer, PROFILE_CATEGORICAL),
-    ])
+    numeric_transformer = Pipeline(
+        steps=[
+            ("impute", SimpleImputer(strategy="median")),
+            ("scale", StandardScaler()),
+        ]
+    )
+    categorical_transformer = Pipeline(
+        steps=[
+            ("impute", SimpleImputer(strategy="most_frequent")),
+            ("onehot", OneHotEncoder(handle_unknown="ignore")),
+        ]
+    )
+    return ColumnTransformer(
+        transformers=[
+            ("num", numeric_transformer, PROFILE_NUMERIC),
+            ("cat", categorical_transformer, PROFILE_CATEGORICAL),
+        ]
+    )
 
 
 def train_and_save() -> dict:
@@ -219,16 +237,20 @@ def train_and_save() -> dict:
     MODELS_DIR.mkdir(parents=True, exist_ok=True)
     version = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
     artifact_path = MODELS_DIR / f"recommender_{version}.joblib"
-    joblib.dump({
-        "preprocessor": preprocessor,
-        "nn_model": nn_model,
-        "X_profile": X_profile,
-        "customer_ids": customer_ids,
-        "service_matrix": service_matrix,
-        "service_columns": SERVICE_COLUMNS,
-        "profile_numeric": PROFILE_NUMERIC,
-        "profile_categorical": PROFILE_CATEGORICAL,
-    }, artifact_path, compress=3)
+    joblib.dump(
+        {
+            "preprocessor": preprocessor,
+            "nn_model": nn_model,
+            "X_profile": X_profile,
+            "customer_ids": customer_ids,
+            "service_matrix": service_matrix,
+            "service_columns": SERVICE_COLUMNS,
+            "profile_numeric": PROFILE_NUMERIC,
+            "profile_categorical": PROFILE_CATEGORICAL,
+        },
+        artifact_path,
+        compress=3,
+    )
 
     metadata = {
         "version": version,
@@ -292,9 +314,7 @@ def _rank_unsubscribed(artifact: dict, distances, neighbor_idxs, own_services, t
     return candidates[:top_n]
 
 
-def recommend_for_profile(
-    artifact: dict, profile: pd.DataFrame, own_services, top_n: int = 3
-) -> list[dict]:
+def recommend_for_profile(artifact: dict, profile: pd.DataFrame, own_services, top_n: int = 3) -> list[dict]:
     """Recommend for *any* customer, whether or not they are in the index.
 
     The fitted k-NN index is a **reference set**, not a registry of every
@@ -333,7 +353,7 @@ def recommend_for_customer(artifact: dict, customer_id: str, top_n: int = 3) -> 
     X_profile = artifact["X_profile"]
     service_matrix = artifact["service_matrix"]
 
-    distances, neighbor_idxs = nn_model.kneighbors(X_profile[idx: idx + 1])
+    distances, neighbor_idxs = nn_model.kneighbors(X_profile[idx : idx + 1])
     neighbor_idxs = neighbor_idxs[0]
     distances = distances[0]
 

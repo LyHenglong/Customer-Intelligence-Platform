@@ -120,7 +120,8 @@ def _recommend_with_fallback(customer_id: str, top_n: int = 3) -> list[dict]:
         except Exception as exc:
             log.warning("warehouse profile lookup failed for %s: %s", customer_id, exc)
             raise HTTPException(
-                status_code=503, detail="customer not in recommender index and warehouse lookup failed",
+                status_code=503,
+                detail="customer not in recommender index and warehouse lookup failed",
             ) from exc
         if profile is None:
             raise HTTPException(status_code=404, detail=f"customer_id {customer_id!r} not found") from None
@@ -172,7 +173,9 @@ def _get_explanation(customer_id: str) -> Optional[dict]:
 
     try:
         explanation = get_or_generate(
-            customer_id, "explanation", state.models["churn_version"],
+            customer_id,
+            "explanation",
+            state.models["churn_version"],
             lambda: ai_explain_churn(churn_probability, shap_details),
         )
         source = "llm"
@@ -242,7 +245,9 @@ def outreach_draft(customer_id: str):
             recommended_service = recs[0]["service"]
             try:
                 draft = get_or_generate(
-                    customer_id, "outreach", state.models["churn_version"],
+                    customer_id,
+                    "outreach",
+                    state.models["churn_version"],
                     lambda: ai_draft_outreach(explanation_result["explanation"], recommended_service),
                 )
                 draft_source = "llm"

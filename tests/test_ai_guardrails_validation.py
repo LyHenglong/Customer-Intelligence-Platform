@@ -9,8 +9,12 @@ from src.ai.schemas import AssistantResponse, Citation, Evidence
 
 def _response(answer, evidence=None, citations=None):
     return AssistantResponse(
-        answer=answer, evidence=evidence or [], citations=citations or [],
-        tools_used=["x"], route="ML_ANALYSIS", trace_id="t1",
+        answer=answer,
+        evidence=evidence or [],
+        citations=citations or [],
+        tools_used=["x"],
+        route="ML_ANALYSIS",
+        trace_id="t1",
     )
 
 

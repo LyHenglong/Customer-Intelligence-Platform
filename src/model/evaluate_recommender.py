@@ -178,8 +178,7 @@ def load_eval_sample(exclude_ids: set, sample_size: int) -> pd.DataFrame:
     columns = [ID_COL] + PROFILE_NUMERIC + PROFILE_CATEGORICAL + SERVICE_COLUMNS
     over_draw = min(sample_size * 4, 200_000)
     df = stream_query(
-        f"SELECT {', '.join(columns)} FROM marts.customer_360 "
-        f"ORDER BY md5(customer_id) LIMIT {int(over_draw)}",
+        f"SELECT {', '.join(columns)} FROM marts.customer_360 ORDER BY md5(customer_id) LIMIT {int(over_draw)}",
         columns=columns,
     )
     df = df[~df[ID_COL].isin(exclude_ids)]
@@ -198,10 +197,7 @@ def evaluate(artifact: dict, eval_df: pd.DataFrame, seed: int = RANDOM_SEED) -> 
 
     # Baseline popularity comes from the reference set, not the evaluation
     # sample: the baseline must only use information the model also had.
-    popularity = {
-        service_columns[i]: float(reference_services[:, i].mean())
-        for i in range(len(service_columns))
-    }
+    popularity = {service_columns[i]: float(reference_services[:, i].mean()) for i in range(len(service_columns))}
 
     profile_cols = artifact["profile_numeric"] + artifact["profile_categorical"]
     X = preprocessor.transform(eval_df[profile_cols])
@@ -294,8 +290,8 @@ def mcnemar_test(a_hits: list[bool], b_hits: list[bool]) -> dict:
 
     a = np.asarray(a_hits, dtype=bool)
     b = np.asarray(b_hits, dtype=bool)
-    a_only = int(np.sum(a & ~b))   # a hit, b missed
-    b_only = int(np.sum(~a & b))   # b hit, a missed
+    a_only = int(np.sum(a & ~b))  # a hit, b missed
+    b_only = int(np.sum(~a & b))  # b hit, a missed
 
     n_discordant = a_only + b_only
     if n_discordant == 0:
@@ -318,12 +314,8 @@ def compare_rankers(records: dict, a: str = "knn", b: str = "popularity") -> dic
             [r["reciprocal_rank"] for r in records[a]],
             [r["reciprocal_rank"] for r in records[b]],
         ),
-        "hit@1_mcnemar": mcnemar_test(
-            [r["hit@1"] for r in records[a]], [r["hit@1"] for r in records[b]]
-        ),
-        "hit@3_mcnemar": mcnemar_test(
-            [r["hit@3"] for r in records[a]], [r["hit@3"] for r in records[b]]
-        ),
+        "hit@1_mcnemar": mcnemar_test([r["hit@1"] for r in records[a]], [r["hit@1"] for r in records[b]]),
+        "hit@3_mcnemar": mcnemar_test([r["hit@3"] for r in records[a]], [r["hit@3"] for r in records[b]]),
     }
 
 
@@ -343,8 +335,7 @@ def format_report(results: dict) -> str:
     for name in ("knn", "popularity", "random"):
         r = results[name]
         lines.append(
-            f"{name:<12} {r['hit_rate@1']:>8.4f} {r['hit_rate@2']:>8.4f} "
-            f"{r['hit_rate@3']:>8.4f} {r['mrr']:>8.4f}"
+            f"{name:<12} {r['hit_rate@1']:>8.4f} {r['hit_rate@2']:>8.4f} {r['hit_rate@3']:>8.4f} {r['mrr']:>8.4f}"
         )
     lines.append("-" * 62)
 

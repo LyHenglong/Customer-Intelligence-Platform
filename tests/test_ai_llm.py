@@ -39,8 +39,9 @@ def test_groq_provider_delegates_to_groq_client(monkeypatch):
     captured = {}
 
     def _fake_complete(system_prompt, user_prompt, max_tokens=500, temperature=0.3):
-        captured.update(system_prompt=system_prompt, user_prompt=user_prompt,
-                         max_tokens=max_tokens, temperature=temperature)
+        captured.update(
+            system_prompt=system_prompt, user_prompt=user_prompt, max_tokens=max_tokens, temperature=temperature
+        )
         return AgentResponse(text="answer", prompt_tokens=10, completion_tokens=5, model="test-model")
 
     monkeypatch.setattr(llm_module, "groq_complete", _fake_complete)

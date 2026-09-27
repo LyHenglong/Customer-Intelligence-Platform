@@ -99,13 +99,21 @@ def load_telco() -> tuple[pd.DataFrame, pd.Series, list[str], list[str]]:
 
 
 def build_pipeline(numeric: list[str], categorical: list[str]) -> Pipeline:
-    preprocessor = ColumnTransformer(transformers=[
-        ("num", SimpleImputer(strategy="median"), numeric),
-        ("cat", Pipeline([
-            ("impute", SimpleImputer(strategy="most_frequent")),
-            ("onehot", OneHotEncoder(handle_unknown="ignore")),
-        ]), categorical),
-    ])
+    preprocessor = ColumnTransformer(
+        transformers=[
+            ("num", SimpleImputer(strategy="median"), numeric),
+            (
+                "cat",
+                Pipeline(
+                    [
+                        ("impute", SimpleImputer(strategy="most_frequent")),
+                        ("onehot", OneHotEncoder(handle_unknown="ignore")),
+                    ]
+                ),
+                categorical,
+            ),
+        ]
+    )
     # Identical hyperparameters to the production model
     # (src/model/train_churn.py), which is the entire point: holding the
     # method fixed is what makes the AUC gap attributable to the data.
@@ -132,10 +140,18 @@ def main() -> None:
     # Same three-way split as the production trainer: calibration never
     # sees training or test data, so the reported metrics stay honest.
     X_train, X_tmp, y_train, y_tmp = train_test_split(
-        X, y, test_size=0.30, random_state=42, stratify=y,
+        X,
+        y,
+        test_size=0.30,
+        random_state=42,
+        stratify=y,
     )
     X_cal, X_test, y_cal, y_test = train_test_split(
-        X_tmp, y_tmp, test_size=0.6667, random_state=42, stratify=y_tmp,
+        X_tmp,
+        y_tmp,
+        test_size=0.6667,
+        random_state=42,
+        stratify=y_tmp,
     )
     log.info("train %d / calibration %d / test %d", len(X_train), len(X_cal), len(X_test))
 
@@ -150,8 +166,7 @@ def main() -> None:
     brier = brier_score_loss(y_test, proba)
     brier_raw = brier_score_loss(y_test, raw_proba)
     base_rate_brier = brier_score_loss(y_test, np.full(len(y_test), y_train.mean()))
-    log.info("Brier: %.4f calibrated vs %.4f uncalibrated (always-base-rate %.4f)",
-             brier, brier_raw, base_rate_brier)
+    log.info("Brier: %.4f calibrated vs %.4f uncalibrated (always-base-rate %.4f)", brier, brier_raw, base_rate_brier)
 
     threshold, precision, recall = choose_threshold(y_test, proba)
     log.info("Decision threshold: %.3f -> precision=%.3f recall=%.3f", threshold, precision, recall)
@@ -164,14 +179,17 @@ def main() -> None:
     # telco_churn_*, NOT churn_model_* - see this module's docstring. The
     # production glob must not be able to pick this up.
     artifact_path = MODELS_DIR / f"telco_churn_{version}.joblib"
-    joblib.dump({
-        "pipeline": calibrated,
-        "base_pipeline": base_pipeline,
-        "threshold": float(threshold),
-        "numeric_features": numeric,
-        "categorical_features": categorical,
-        "dataset": KAGGLE_DATASET,
-    }, artifact_path)
+    joblib.dump(
+        {
+            "pipeline": calibrated,
+            "base_pipeline": base_pipeline,
+            "threshold": float(threshold),
+            "numeric_features": numeric,
+            "categorical_features": categorical,
+            "dataset": KAGGLE_DATASET,
+        },
+        artifact_path,
+    )
 
     metadata = {
         "version": version,

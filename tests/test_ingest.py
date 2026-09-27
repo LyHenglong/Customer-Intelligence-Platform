@@ -107,13 +107,20 @@ def test_engineered_features_zero_active_services():
             header = next(reader)
             writer = csv.writer(f)
             writer.writerow(header)
-            row = next(r for r in csv.DictReader(open(FIXTURE_PATH, encoding="utf-8")) if r["customer_id"] == "CUST_TEST_0001")
+            row = next(
+                r for r in csv.DictReader(open(FIXTURE_PATH, encoding="utf-8")) if r["customer_id"] == "CUST_TEST_0001"
+            )
             row = dict(row)
             row["customer_id"] = "CUST_TEST_ZERO"
             for svc in [
-                "has_phone_service", "has_internet_service", "has_online_security",
-                "has_online_backup", "has_device_protection", "has_tech_support",
-                "has_streaming_tv", "has_streaming_movies",
+                "has_phone_service",
+                "has_internet_service",
+                "has_online_security",
+                "has_online_backup",
+                "has_device_protection",
+                "has_tech_support",
+                "has_streaming_tv",
+                "has_streaming_movies",
             ]:
                 row[svc] = "0"
             writer.writerow([row[c] for c in header])

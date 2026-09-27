@@ -94,9 +94,14 @@ def _from_scored_cache(filters: dict, churn_artifact, churn_version) -> ChurnAna
     population_size = int(len(frame))
     if population_size == 0:
         return ChurnAnalysisResult(
-            population_size=0, current_churn_rate=0.0, predicted_high_risk_count=0,
-            mean_churn_probability=0.0, median_churn_probability=0.0,
-            model_version=churn_version, threshold=0.0, filters_applied=filters,
+            population_size=0,
+            current_churn_rate=0.0,
+            predicted_high_risk_count=0,
+            mean_churn_probability=0.0,
+            median_churn_probability=0.0,
+            model_version=churn_version,
+            threshold=0.0,
+            filters_applied=filters,
         )
 
     proba = frame["churn_probability"].to_numpy()
@@ -117,9 +122,7 @@ def _compute_churn_analysis(filters: dict | None = None, batch_size: int = 25_00
     filters = filters or {}
     unknown = set(filters) - _ALLOWED_FILTER_COLUMNS
     if unknown:
-        raise ValueError(
-            f"unsupported churn_analysis filter(s) {unknown}; allowed: {sorted(_ALLOWED_FILTER_COLUMNS)}"
-        )
+        raise ValueError(f"unsupported churn_analysis filter(s) {unknown}; allowed: {sorted(_ALLOWED_FILTER_COLUMNS)}")
 
     artifact_for_cache, version_for_cache = load_churn_artifact()
     from_cache = _from_scored_cache(filters, artifact_for_cache, version_for_cache)
@@ -151,7 +154,10 @@ def _compute_churn_analysis(filters: dict | None = None, batch_size: int = 25_00
 
     stream_query(
         f"SELECT {', '.join(score_cols)} FROM marts.customer_360 {where_clause}",
-        columns=score_cols, batch_rows=batch_size, transform=_score_batch, params=params,
+        columns=score_cols,
+        batch_rows=batch_size,
+        transform=_score_batch,
+        params=params,
     )
 
     actual = np.concatenate(actual_churn) if actual_churn else np.array([])

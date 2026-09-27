@@ -10,8 +10,14 @@ from src.ai.rag import bm25 as bm25_module
 
 def _chunk(chunk_id, text):
     return {
-        "chunk_id": chunk_id, "document_id": "doc1", "title": "T", "source": "doc1",
-        "section": None, "page": None, "text": text, "metadata": {},
+        "chunk_id": chunk_id,
+        "document_id": "doc1",
+        "title": "T",
+        "source": "doc1",
+        "section": None,
+        "page": None,
+        "text": text,
+        "metadata": {},
     }
 
 

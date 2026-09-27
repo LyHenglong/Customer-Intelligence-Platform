@@ -32,9 +32,15 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(me
 log = logging.getLogger("ai.evaluation.benchmark")
 
 _FAILURE_SCORE = {
-    "route_correct": False, "tool_selection_accuracy": 0.0, "citation_correctness": 0.0,
-    "unsupported_claim_rate": 1.0, "faithfulness": 0.0, "answer_relevancy": 0.0,
-    "context_precision": 0.0, "context_recall": 0.0, "latency_ms": None,
+    "route_correct": False,
+    "tool_selection_accuracy": 0.0,
+    "citation_correctness": 0.0,
+    "unsupported_claim_rate": 1.0,
+    "faithfulness": 0.0,
+    "answer_relevancy": 0.0,
+    "context_precision": 0.0,
+    "context_recall": 0.0,
+    "latency_ms": None,
 }
 
 

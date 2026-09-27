@@ -120,21 +120,47 @@ os.environ.setdefault("MLFLOW_HTTP_REQUEST_TIMEOUT", "30")
 os.environ.setdefault("MLFLOW_HTTP_REQUEST_MAX_RETRIES", "2")
 
 NUMERIC_FEATURES = [
-    "age", "annual_income", "dependents", "tenure", "tenure_years",
-    "monthlycharges", "totalcharges", "num_services", "total_active_services",
-    "cost_per_active_service", "customer_satisfaction", "num_complaints",
-    "num_service_calls", "late_payments", "avg_monthly_gb", "avg_gb_per_service",
-    "days_since_last_interaction", "credit_score", "complaints_per_tenure_month",
+    "age",
+    "annual_income",
+    "dependents",
+    "tenure",
+    "tenure_years",
+    "monthlycharges",
+    "totalcharges",
+    "num_services",
+    "total_active_services",
+    "cost_per_active_service",
+    "customer_satisfaction",
+    "num_complaints",
+    "num_service_calls",
+    "late_payments",
+    "avg_monthly_gb",
+    "avg_gb_per_service",
+    "days_since_last_interaction",
+    "credit_score",
+    "complaints_per_tenure_month",
     "annual_spend_to_income_ratio",
 ]
 BOOLEAN_FEATURES = [
-    "senior_citizen", "paperless_billing", "has_phone_service",
-    "has_internet_service", "has_online_security", "has_online_backup",
-    "has_device_protection", "has_tech_support", "has_streaming_tv",
-    "has_streaming_movies", "is_month_to_month", "is_disengaged",
+    "senior_citizen",
+    "paperless_billing",
+    "has_phone_service",
+    "has_internet_service",
+    "has_online_security",
+    "has_online_backup",
+    "has_device_protection",
+    "has_tech_support",
+    "has_streaming_tv",
+    "has_streaming_movies",
+    "is_month_to_month",
+    "is_disengaged",
 ]
 CATEGORICAL_FEATURES = [
-    "gender", "education", "marital_status", "contract", "payment_method",
+    "gender",
+    "education",
+    "marital_status",
+    "contract",
+    "payment_method",
     "tenure_bucket",
 ]
 TARGET = "churn"
@@ -187,9 +213,7 @@ def load_customer_360(max_rows: int | None = None) -> pd.DataFrame:
         # This exact pattern OOM-killed the Airflow retrain task (SIGKILL,
         # return code -9) at ~460K rows inside a 900MB container.
         frames = []
-        for chunk in pd.read_sql(
-            f"SELECT {cols} FROM marts.customer_360{limit_clause}", conn, chunksize=25_000
-        ):
+        for chunk in pd.read_sql(f"SELECT {cols} FROM marts.customer_360{limit_clause}", conn, chunksize=25_000):
             for c in BOOLEAN_FEATURES:
                 chunk[c] = chunk[c].astype("float")  # bool -> 0.0/1.0, NaN-safe
             # category dtype for the low-cardinality string columns: as
@@ -208,14 +232,18 @@ def load_customer_360(max_rows: int | None = None) -> pd.DataFrame:
 
 def build_pipeline() -> Pipeline:
     numeric_transformer = SimpleImputer(strategy="median")
-    categorical_transformer = Pipeline(steps=[
-        ("impute", SimpleImputer(strategy="most_frequent")),
-        ("onehot", OneHotEncoder(handle_unknown="ignore")),
-    ])
-    preprocessor = ColumnTransformer(transformers=[
-        ("num", numeric_transformer, NUMERIC_FEATURES + BOOLEAN_FEATURES),
-        ("cat", categorical_transformer, CATEGORICAL_FEATURES),
-    ])
+    categorical_transformer = Pipeline(
+        steps=[
+            ("impute", SimpleImputer(strategy="most_frequent")),
+            ("onehot", OneHotEncoder(handle_unknown="ignore")),
+        ]
+    )
+    preprocessor = ColumnTransformer(
+        transformers=[
+            ("num", numeric_transformer, NUMERIC_FEATURES + BOOLEAN_FEATURES),
+            ("cat", categorical_transformer, CATEGORICAL_FEATURES),
+        ]
+    )
     # LightGBM, not RandomForest: a dedicated model-comparison experiment
     # (notebooks/model_dev_offline.py) found it gives a small but real edge
     # (higher AUC, confirmed by 5-fold CV) and trains ~6x faster at this
@@ -285,10 +313,18 @@ def train_and_save(df: pd.DataFrame | None = None) -> dict:
     # model was not fitted on, and reusing the test set for it would leak
     # the test labels into the reported metrics.
     X_train, X_tmp, y_train, y_tmp = train_test_split(
-        X, y, test_size=0.30, random_state=42, stratify=y,
+        X,
+        y,
+        test_size=0.30,
+        random_state=42,
+        stratify=y,
     )
     X_calib, X_test, y_calib, y_test = train_test_split(
-        X_tmp, y_tmp, test_size=0.6667, random_state=42, stratify=y_tmp,
+        X_tmp,
+        y_tmp,
+        test_size=0.6667,
+        random_state=42,
+        stratify=y_tmp,
     )
 
     base_pipeline = build_pipeline()
@@ -327,15 +363,21 @@ def train_and_save(df: pd.DataFrame | None = None) -> dict:
     brier_uncalibrated = brier_score_loss(y_test, y_proba_uncalibrated)
     brier_base_rate = brier_score_loss(y_test, np.full(len(y_test), base_rate))
     log.info(
-        "Brier: %.4f calibrated vs %.4f uncalibrated (always-base-rate %.4f); "
-        "mean predicted %.4f vs actual %.4f",
-        brier, brier_uncalibrated, brier_base_rate, float(y_proba.mean()), base_rate,
+        "Brier: %.4f calibrated vs %.4f uncalibrated (always-base-rate %.4f); mean predicted %.4f vs actual %.4f",
+        brier,
+        brier_uncalibrated,
+        brier_base_rate,
+        float(y_proba.mean()),
+        base_rate,
     )
 
     threshold, threshold_precision, threshold_recall = choose_threshold(y_test, y_proba)
     log.info(
         "Decision threshold: %.3f (target recall >= %.2f) -> precision=%.3f recall=%.3f",
-        threshold, TARGET_RECALL, threshold_precision, threshold_recall,
+        threshold,
+        TARGET_RECALL,
+        threshold_precision,
+        threshold_recall,
     )
     y_pred = (y_proba >= threshold).astype(int)
 
@@ -417,15 +459,16 @@ def train_and_save(df: pd.DataFrame | None = None) -> dict:
             mlflow.set_tracking_uri(MLFLOW_TRACKING_URI)
             mlflow.set_experiment("churn_model")
             with mlflow.start_run(run_name=version):
-                mlflow.log_params({
-                    "target_recall": TARGET_RECALL,
-                    "max_training_rows": MAX_TRAINING_ROWS,
-                    "calibration_method": "sigmoid",
-                })
-                mlflow.log_metrics({
-                    k: v for k, v in metadata.items()
-                    if isinstance(v, (int, float)) and not isinstance(v, bool)
-                })
+                mlflow.log_params(
+                    {
+                        "target_recall": TARGET_RECALL,
+                        "max_training_rows": MAX_TRAINING_ROWS,
+                        "calibration_method": "sigmoid",
+                    }
+                )
+                mlflow.log_metrics(
+                    {k: v for k, v in metadata.items() if isinstance(v, (int, float)) and not isinstance(v, bool)}
+                )
                 mlflow.log_artifact(str(model_path))
                 mlflow.log_artifact(str(meta_path))
                 run_id = mlflow.active_run().info.run_id
@@ -440,7 +483,9 @@ def train_and_save(df: pd.DataFrame | None = None) -> dict:
                 else:
                     log.info(
                         "Registered churn_model v%s (not aliased champion: recall %.3f < target %.2f)",
-                        mv.version, metadata["recall_churn"], TARGET_RECALL,
+                        mv.version,
+                        metadata["recall_churn"],
+                        TARGET_RECALL,
                     )
         except Exception as exc:
             log.warning("MLflow logging/registration failed (training itself succeeded): %s", exc)

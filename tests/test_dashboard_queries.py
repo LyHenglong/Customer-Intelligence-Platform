@@ -61,7 +61,9 @@ def test_load_overall_stats_returns_typed_dict(monkeypatch):
 
 
 def test_load_segment_rates_rejects_unknown_column(monkeypatch):
-    monkeypatch.setattr(dashboard_queries, "get_pg_conn", lambda: (_ for _ in ()).throw(AssertionError("must not connect")))
+    monkeypatch.setattr(
+        dashboard_queries, "get_pg_conn", lambda: (_ for _ in ()).throw(AssertionError("must not connect"))
+    )
 
     with pytest.raises(ValueError):
         dashboard_queries.load_segment_rates("customer_id; DROP TABLE marts.customer_360")
@@ -80,7 +82,9 @@ def test_load_segment_rates_allows_a_real_categorical_column(monkeypatch):
 
 
 def test_load_customers_by_id_empty_tuple_skips_the_database(monkeypatch):
-    monkeypatch.setattr(dashboard_queries, "get_pg_conn", lambda: (_ for _ in ()).throw(AssertionError("must not connect")))
+    monkeypatch.setattr(
+        dashboard_queries, "get_pg_conn", lambda: (_ for _ in ()).throw(AssertionError("must not connect"))
+    )
 
     result = dashboard_queries.load_customers_by_id(())
 
@@ -148,7 +152,8 @@ def test_load_precomputed_scores_returns_none_when_no_rows_for_version(monkeypat
     conn = _SeqConn([("public.churn_scores",)])  # to_regclass(...) - table exists
     monkeypatch.setattr(dashboard_queries, "get_pg_conn", lambda: conn)
     monkeypatch.setattr(
-        dashboard_queries, "stream_query",
+        dashboard_queries,
+        "stream_query",
         lambda query, columns, **kw: pd.DataFrame(columns=columns),
     )
 
@@ -167,7 +172,20 @@ def test_load_precomputed_scores_reads_via_stream_query_not_fetchall(monkeypatch
     def _fake_stream_query(query, columns, **kw):
         assert "model_version" in query
         return pd.DataFrame(
-            [("CUST0001", 0.42, 79.99, 1, "Male", "Bachelors", "Married", "month-to-month", "Electronic check", "0-12")],
+            [
+                (
+                    "CUST0001",
+                    0.42,
+                    79.99,
+                    1,
+                    "Male",
+                    "Bachelors",
+                    "Married",
+                    "month-to-month",
+                    "Electronic check",
+                    "0-12",
+                )
+            ],
             columns=columns,
         )
 
@@ -178,8 +196,16 @@ def test_load_precomputed_scores_reads_via_stream_query_not_fetchall(monkeypatch
     assert frame is not None
     assert len(frame) == 1
     assert list(frame.columns) == [
-        "customer_id", "churn_probability", "monthlycharges", "churn",
-        "gender", "education", "marital_status", "contract", "payment_method", "tenure_bucket",
+        "customer_id",
+        "churn_probability",
+        "monthlycharges",
+        "churn",
+        "gender",
+        "education",
+        "marital_status",
+        "contract",
+        "payment_method",
+        "tenure_bucket",
     ]
     assert frame["churn_probability"].dtype == np.float32
     assert frame["churn"].dtype == np.int8
@@ -193,7 +219,8 @@ def test_get_scored_customers_uses_precomputed_path_when_enabled(monkeypatch):
     precomputed = pd.DataFrame({"customer_id": ["CUST0001"], "churn_probability": [0.9]})
     monkeypatch.setattr(dashboard_queries, "load_precomputed_scores", lambda v: precomputed)
     monkeypatch.setattr(
-        dashboard_queries, "score_all_customers",
+        dashboard_queries,
+        "score_all_customers",
         lambda *a, **kw: (_ for _ in ()).throw(AssertionError("must not live-score")),
     )
 
@@ -220,7 +247,8 @@ def test_get_scored_customers_skips_precomputed_lookup_when_disabled(monkeypatch
     dashboard_queries.clear_scored_cache()
     monkeypatch.setattr(dashboard_queries, "_USE_PRECOMPUTED_SCORES", False)
     monkeypatch.setattr(
-        dashboard_queries, "load_precomputed_scores",
+        dashboard_queries,
+        "load_precomputed_scores",
         lambda v: (_ for _ in ()).throw(AssertionError("must not consult precomputed table")),
     )
     live = pd.DataFrame({"customer_id": ["CUST0001"], "churn_probability": [0.1]})
@@ -275,6 +303,7 @@ def test_column_importances_prefers_gain_over_lightgbms_split_counts():
     credit_score (univariate AUC 0.51 - noise) top of the dashboard and the
     AI assistant, while contract (4.95x churn separation) fell outside the
     top six. Gain ranks them correctly."""
+
     class _FakeBooster:
         def feature_importance(self, importance_type):
             assert importance_type == "gain"
@@ -302,6 +331,7 @@ def test_column_importances_falls_back_when_there_is_no_booster():
     """Non-LightGBM estimators (this project shipped RandomForest first)
     expose mean impurity decrease via feature_importances_, which is already
     a gain measure - no booster to read."""
+
     class _FakePreprocessor:
         def get_feature_names_out(self):
             return ["num__tenure"]

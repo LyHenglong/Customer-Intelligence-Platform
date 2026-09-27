@@ -28,10 +28,24 @@ from src.warehouse import get_pg_conn
 log = logging.getLogger("ai.observability.tracing")
 
 _COLUMNS = [
-    "trace_id", "request_timestamp", "user_query", "route", "tools_used", "tool_latency_ms",
-    "sql_query_hash", "retrieval_latency_ms", "retrieved_documents", "reranker_latency_ms",
-    "llm_model", "input_tokens", "output_tokens", "estimated_cost_usd", "total_latency_ms",
-    "validation_result", "fallback_status", "error",
+    "trace_id",
+    "request_timestamp",
+    "user_query",
+    "route",
+    "tools_used",
+    "tool_latency_ms",
+    "sql_query_hash",
+    "retrieval_latency_ms",
+    "retrieved_documents",
+    "reranker_latency_ms",
+    "llm_model",
+    "input_tokens",
+    "output_tokens",
+    "estimated_cost_usd",
+    "total_latency_ms",
+    "validation_result",
+    "fallback_status",
+    "error",
 ]
 
 
@@ -89,13 +103,23 @@ def write_trace(trace: dict) -> None:
                 ON CONFLICT (trace_id) DO NOTHING
                 """,
                 (
-                    trace["trace_id"], trace["user_query"], trace.get("route"),
-                    json.dumps(trace.get("tools_used", [])), json.dumps(trace.get("tool_latency_ms", {})),
-                    trace.get("sql_query_hash"), trace.get("retrieval_latency_ms"),
-                    json.dumps(trace.get("retrieved_documents", [])), trace.get("reranker_latency_ms"),
-                    trace.get("llm_model"), trace.get("input_tokens"), trace.get("output_tokens"),
-                    trace.get("estimated_cost_usd"), trace.get("total_latency_ms"),
-                    trace.get("validation_result"), trace.get("fallback_status", False), trace.get("error"),
+                    trace["trace_id"],
+                    trace["user_query"],
+                    trace.get("route"),
+                    json.dumps(trace.get("tools_used", [])),
+                    json.dumps(trace.get("tool_latency_ms", {})),
+                    trace.get("sql_query_hash"),
+                    trace.get("retrieval_latency_ms"),
+                    json.dumps(trace.get("retrieved_documents", [])),
+                    trace.get("reranker_latency_ms"),
+                    trace.get("llm_model"),
+                    trace.get("input_tokens"),
+                    trace.get("output_tokens"),
+                    trace.get("estimated_cost_usd"),
+                    trace.get("total_latency_ms"),
+                    trace.get("validation_result"),
+                    trace.get("fallback_status", False),
+                    trace.get("error"),
                 ),
             )
         conn.commit()
@@ -130,8 +154,7 @@ def list_recent_traces(limit: int = 500) -> list[dict]:
             if cur.fetchone()[0] is None:
                 return []
             cur.execute(
-                f"SELECT {', '.join(_COLUMNS)} FROM public.ai_traces "
-                f"ORDER BY request_timestamp DESC LIMIT %s",
+                f"SELECT {', '.join(_COLUMNS)} FROM public.ai_traces ORDER BY request_timestamp DESC LIMIT %s",
                 (limit,),
             )
             rows = cur.fetchall()

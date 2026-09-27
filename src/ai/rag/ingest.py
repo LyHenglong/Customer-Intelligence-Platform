@@ -52,9 +52,7 @@ def _chunk_id(document_id: str, strategy: str, index: int) -> str:
 
 def ingest(strategy: str = DEFAULT_STRATEGY) -> dict:
     if strategy not in CHUNKING_STRATEGIES:
-        raise ValueError(
-            f"unknown chunking strategy {strategy!r}; choose from {sorted(CHUNKING_STRATEGIES)}"
-        )
+        raise ValueError(f"unknown chunking strategy {strategy!r}; choose from {sorted(CHUNKING_STRATEGIES)}")
     chunk_fn = CHUNKING_STRATEGIES[strategy]
 
     ensure_table()
@@ -111,7 +109,11 @@ def ingest(strategy: str = DEFAULT_STRATEGY) -> dict:
     }
     log.info(
         "Documents: %d\nChunks: %d\nEmbedded: %d\nIndexed: %d\nFailed: %d",
-        report["documents"], report["chunks"], report["embedded"], report["indexed"], report["failed"],
+        report["documents"],
+        report["chunks"],
+        report["embedded"],
+        report["indexed"],
+        report["failed"],
     )
     return report
 

@@ -64,7 +64,6 @@ default_args = {
     tags=["telecom-churn"],
 )
 def churn_pipeline():
-
     @task
     def ingest_next_batch() -> str:
         """Picks up the next unprocessed data/raw/batch_*.csv file (if any),
@@ -177,7 +176,8 @@ def churn_pipeline():
         metadata = train_and_save()
         log.info(
             "Retrained recommender: version=%s reference_profiles=%d",
-            metadata["version"], metadata["n_customers"],
+            metadata["version"],
+            metadata["n_customers"],
         )
         return metadata
 
@@ -211,11 +211,18 @@ def churn_pipeline():
         try:
             response = ai_summarize_retrain(current_metadata, previous_metadata, drift_summary)
             summary_text, prompt_tokens, completion_tokens, source = (
-                response.text, response.prompt_tokens, response.completion_tokens, "llm",
+                response.text,
+                response.prompt_tokens,
+                response.completion_tokens,
+                "llm",
             )
         except AgentCallFailed as exc:
             log.warning("retrain summary agent unavailable, falling back to raw metrics: %s", exc)
-            prev_str = f"previous version {previous_metadata['version']}" if previous_metadata else "no previous version recorded"
+            prev_str = (
+                f"previous version {previous_metadata['version']}"
+                if previous_metadata
+                else "no previous version recorded"
+            )
             summary_text = (
                 f"[AI summary unavailable - raw metrics] New model {current_metadata['version']}: "
                 f"precision={current_metadata['precision_churn']:.4f} recall={current_metadata['recall_churn']:.4f} "
@@ -227,9 +234,7 @@ def churn_pipeline():
         out_dir = Path("/opt/airflow/report/retrain_summaries")
         out_dir.mkdir(parents=True, exist_ok=True)
         out_path = out_dir / f"retrain_summary_{current_metadata['version']}.md"
-        out_path.write_text(
-            f"# Retrain summary: {current_metadata['version']}\n\nSource: {source}\n\n{summary_text}\n"
-        )
+        out_path.write_text(f"# Retrain summary: {current_metadata['version']}\n\nSource: {source}\n\n{summary_text}\n")
 
         put_retrain_summary(
             current_metadata["version"],

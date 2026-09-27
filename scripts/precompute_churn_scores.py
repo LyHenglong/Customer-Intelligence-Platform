@@ -68,7 +68,10 @@ def main() -> None:
     log.info("Scored %d customers, persisting to public.churn_scores...", len(frame))
 
     store_scored_customers(frame, churn_version)
-    log.info("Done. get_scored_customers(version=%s) will now read this table when USE_PRECOMPUTED_SCORES=true.", churn_version)
+    log.info(
+        "Done. get_scored_customers(version=%s) will now read this table when USE_PRECOMPUTED_SCORES=true.",
+        churn_version,
+    )
 
 
 if __name__ == "__main__":
