@@ -6,7 +6,7 @@ test_ai_rag_vector_store.py for those)."""
 
 from __future__ import annotations
 
-from src.ai.rag.hybrid_search import RRF_K, hybrid_search, rrf_fuse
+from src.ai.rag.hybrid_search import RRF_K, rrf_fuse
 
 
 def _cand(chunk_id, **kw):

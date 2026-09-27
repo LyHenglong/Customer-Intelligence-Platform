@@ -21,7 +21,7 @@ def batch_result():
 
 
 def _as_dicts(rows, columns):
-    return [dict(zip(columns, row)) for row in rows]
+    return [dict(zip(columns, row, strict=False)) for row in rows]
 
 
 def test_raw_layer_keeps_all_rows(batch_result):

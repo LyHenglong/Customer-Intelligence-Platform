@@ -123,7 +123,7 @@ def _recommend_with_fallback(customer_id: str, top_n: int = 3) -> list[dict]:
                 status_code=503, detail="customer not in recommender index and warehouse lookup failed",
             ) from exc
         if profile is None:
-            raise HTTPException(status_code=404, detail=f"customer_id {customer_id!r} not found")
+            raise HTTPException(status_code=404, detail=f"customer_id {customer_id!r} not found") from None
         return recommend_for_profile(artifact, profile, own_services, top_n=top_n)
 
 

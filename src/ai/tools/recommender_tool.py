@@ -10,8 +10,13 @@ import pandas as pd
 
 from src.ai.schemas import Recommendation
 from src.ai.tools._artifacts import load_recommender_artifact
-from src.model.train_recommender import PROFILE_CATEGORICAL, PROFILE_NUMERIC, SERVICE_COLUMNS
-from src.model.train_recommender import recommend_for_customer, recommend_for_profile
+from src.model.train_recommender import (
+    PROFILE_CATEGORICAL,
+    PROFILE_NUMERIC,
+    SERVICE_COLUMNS,
+    recommend_for_customer,
+    recommend_for_profile,
+)
 from src.warehouse import get_pg_conn
 
 

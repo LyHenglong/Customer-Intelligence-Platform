@@ -18,12 +18,10 @@ from __future__ import annotations
 
 import httpx
 import pytest
-from groq import APIConnectionError, APITimeoutError, RateLimitError
+from groq import APITimeoutError, RateLimitError
 
-from src.agents import groq_client
+from src.agents import explanation_agent, groq_client, outreach_agent, retrain_summary_agent
 from src.agents.groq_client import AgentCallFailed, AgentResponse
-from src.agents import explanation_agent, outreach_agent, retrain_summary_agent
-
 
 # --------------------------------------------------------------------------
 # Fixtures / helpers

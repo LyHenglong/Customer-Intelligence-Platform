@@ -11,10 +11,7 @@ from fastapi.testclient import TestClient
 
 from src.ai.schemas import AssistantResponse
 from src.api import app as app_module
-from src.api import state as api_state
 from src.api.routers import assistant as assistant_router
-from src.api.routers import dashboard as dashboard_router
-from src.api.routers import models as models_router
 
 
 @pytest.fixture(autouse=True)

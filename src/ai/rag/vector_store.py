@@ -131,7 +131,7 @@ def vector_search(query_embedding, top_k: int = 20) -> list[dict]:
             )
             cols = [d[0] for d in cur.description]
             rows = cur.fetchall()
-        return [dict(zip(cols, r)) for r in rows]
+        return [dict(zip(cols, r, strict=False)) for r in rows]
     finally:
         conn.close()
 
@@ -152,6 +152,6 @@ def fetch_all_chunks_for_bm25() -> list[dict]:
             )
             cols = [d[0] for d in cur.description]
             rows = cur.fetchall()
-        return [dict(zip(cols, r)) for r in rows]
+        return [dict(zip(cols, r, strict=False)) for r in rows]
     finally:
         conn.close()

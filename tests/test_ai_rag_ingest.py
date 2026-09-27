@@ -6,8 +6,6 @@ are monkeypatched - no embedding model, no database.
 
 from __future__ import annotations
 
-from pathlib import Path
-
 import pytest
 
 from src.ai.rag import ingest as ingest_module

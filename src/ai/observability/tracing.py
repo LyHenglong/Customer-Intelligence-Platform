@@ -114,7 +114,7 @@ def get_trace(trace_id: str) -> Optional[dict]:
             row = cur.fetchone()
             if row is None:
                 return None
-        return dict(zip(_COLUMNS, row))
+        return dict(zip(_COLUMNS, row, strict=False))
     finally:
         conn.close()
 
@@ -135,6 +135,6 @@ def list_recent_traces(limit: int = 500) -> list[dict]:
                 (limit,),
             )
             rows = cur.fetchall()
-        return [dict(zip(_COLUMNS, r)) for r in rows]
+        return [dict(zip(_COLUMNS, r, strict=False)) for r in rows]
     finally:
         conn.close()

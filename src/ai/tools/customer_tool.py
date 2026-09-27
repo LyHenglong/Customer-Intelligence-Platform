@@ -66,7 +66,7 @@ def customer_lookup(customer_id: str) -> CustomerLookupResult:
     if row is None:
         return CustomerLookupResult(customer_id=customer_id, found=False)
 
-    row_dict = dict(zip(fetch_columns, row))
+    row_dict = dict(zip(fetch_columns, row, strict=False))
     result = CustomerLookupResult(
         customer_id=customer_id, found=True, profile=_row_to_profile(row_dict)
     )
@@ -165,7 +165,7 @@ def customer_search(
                     params + [limit, offset],
                 )
                 rows = cur.fetchall()
-                customers = [_row_to_profile(dict(zip(_DISPLAY_COLUMNS, r))) for r in rows]
+                customers = [_row_to_profile(dict(zip(_DISPLAY_COLUMNS, r, strict=False))) for r in rows]
                 return CustomerSearchResult(
                     customers=customers, total_matched=total_matched,
                     limit=limit, offset=offset,

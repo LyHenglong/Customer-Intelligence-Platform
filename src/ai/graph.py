@@ -38,7 +38,6 @@ from src.ai.observability import tracing
 from src.ai.observability.cost import estimate_cost
 from src.ai.rag.hybrid_search import hybrid_search
 from src.ai.router import (
-    CUSTOMER_LOOKUP,
     ML_ANALYSIS,
     MULTI_SOURCE,
     RAG_SEARCH,

@@ -72,7 +72,7 @@ def _apply_where(df: pd.DataFrame, query: str, params: list):
     n = len(conds)
     where_params, rest_params = params[:n], params[n:]
     result = df
-    for (col, op), val in zip(conds, where_params):
+    for (col, op), val in zip(conds, where_params, strict=False):
         if op == "=":
             result = result[result[col] == val]
         elif op == ">=":

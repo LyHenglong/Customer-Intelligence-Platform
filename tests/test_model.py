@@ -21,7 +21,6 @@ from src.model.threshold_analysis import (
 from src.model.train_churn import choose_threshold
 from src.model.train_recommender import recommend_for_customer
 
-
 # --------------------------------------------------------------------------
 # Expected-value threshold analysis
 # --------------------------------------------------------------------------

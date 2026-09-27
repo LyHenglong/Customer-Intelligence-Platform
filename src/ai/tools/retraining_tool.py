@@ -51,7 +51,7 @@ def _load_latest_drift() -> list[dict]:
             )
             cols = [d[0] for d in cur.description]
             rows = cur.fetchall()
-        return [dict(zip(cols, r)) for r in rows]
+        return [dict(zip(cols, r, strict=False)) for r in rows]
     finally:
         conn.close()
 

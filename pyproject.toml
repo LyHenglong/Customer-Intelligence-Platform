@@ -1,0 +1,57 @@
+# Tool configuration. Dependencies stay in requirements*.txt, which the
+# Dockerfiles and CI install from directly.
+
+[project]
+name = "customer-intelligence-platform"
+version = "1.1.0"
+description = "Telecom churn prediction, service recommendation and an AI decision assistant over a dbt + Airflow data platform."
+requires-python = ">=3.11,<3.12"
+license = { text = "MIT" }
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
+testpaths = ["tests"]
+addopts = "-ra"
+filterwarnings = [
+    # Third-party deprecations (mlflow, pydantic v1 shims) - not actionable here.
+    "ignore::DeprecationWarning:mlflow.*",
+    "ignore::pydantic.warnings.PydanticDeprecatedSince20",
+]
+
+[tool.coverage.run]
+source = ["src"]
+branch = true
+omit = [
+    # One-off / infrastructure entry points exercised by Airflow and manual
+    # runs rather than unit tests.
+    "src/ingest/split_batches.py",
+    "src/model/train_churn_telco.py",
+]
+
+[tool.coverage.report]
+show_missing = false
+skip_covered = true
+precision = 1
+exclude_also = [
+    "if __name__ == .__main__.:",
+    "raise NotImplementedError",
+]
+
+[tool.ruff]
+line-length = 120
+target-version = "py311"
+extend-exclude = ["frontend", "dbt", "notebooks/*.ipynb"]
+
+[tool.ruff.lint]
+# Pyflakes, pycodestyle errors, bugbear and import sorting. Long lines are
+# left to the formatter rather than reported.
+select = ["E4", "E7", "E9", "F", "W", "B", "I"]
+
+[tool.ruff.lint.per-file-ignores]
+# Offline scripts set sys.path / env before importing project modules.
+"notebooks/*.py" = ["E402"]
+# pytest fixtures and parametrize ids routinely shadow / reuse loop names.
+"tests/*" = ["B007", "B017"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["src"]

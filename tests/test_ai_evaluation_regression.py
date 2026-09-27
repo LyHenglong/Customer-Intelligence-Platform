@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from src.ai.evaluation import regression as regression_module
 from src.ai.evaluation.datasets import load_benchmark_dataset
-from src.ai.schemas import AssistantResponse
 
 
 def test_sample_questions_picks_per_route_sample_size():

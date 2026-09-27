@@ -468,7 +468,7 @@ def column_importances(pipeline) -> dict:
         return {}
 
     grouped: dict[str, float] = {}
-    for name, imp in zip(names, raw_importances):
+    for name, imp in zip(names, raw_importances, strict=False):
         if name.startswith("num__"):
             col = name[len("num__"):]
         elif name.startswith("cat__"):

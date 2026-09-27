@@ -332,7 +332,6 @@ def recommend_for_customer(artifact: dict, customer_id: str, top_n: int = 3) -> 
     nn_model: NearestNeighbors = artifact["nn_model"]
     X_profile = artifact["X_profile"]
     service_matrix = artifact["service_matrix"]
-    service_columns = artifact["service_columns"]
 
     distances, neighbor_idxs = nn_model.kneighbors(X_profile[idx: idx + 1])
     neighbor_idxs = neighbor_idxs[0]
