@@ -82,3 +82,8 @@ neon_migration.sql
 # agentRules) - tooling output, not authored source.
 frontend/AGENTS.md
 frontend/CLAUDE.md
+
+# Coverage
+.coverage
+coverage.xml
+htmlcov/

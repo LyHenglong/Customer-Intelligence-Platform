@@ -32,6 +32,8 @@ omit = [
 show_missing = false
 skip_covered = true
 precision = 1
+# Current unit-test coverage is ~77%; this floor stops it quietly regressing.
+fail_under = 75
 exclude_also = [
     "if __name__ == .__main__.:",
     "raise NotImplementedError",
