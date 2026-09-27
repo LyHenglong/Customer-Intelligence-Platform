@@ -107,7 +107,7 @@ services:
     # of this stack already treats Postgres as the one stateful service.
     # Artifact store is a local bind mount, same convention as
     # ./models_store - this is bookkeeping/provenance, not the file the
-    # api/dashboard actually load at runtime (that's still
+    # api actually loads at runtime (that's still
     # models_store/*.joblib, resolved by src/model/registry.py).
     build:
       context: .
@@ -295,7 +295,7 @@ services:
     # Render (which already provides TLS for free on its own - see
     # render.yaml). Only relevant with a real domain's DNS pointed at this
     # host; not useful for local dev (see docker/Caddyfile). A separate
-    # "production" profile, not "serving": local/dev use of api+dashboard
+    # "production" profile, not "serving": local/dev use of api+frontend
     # never needs this, only a real self-hosted deployment does.
     image: caddy:2-alpine
     environment:

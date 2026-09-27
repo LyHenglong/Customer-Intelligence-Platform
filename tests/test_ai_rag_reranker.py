@@ -8,6 +8,9 @@ for the whole process lifetime.
 
 from __future__ import annotations
 
+import sys
+import types
+
 import pytest
 
 from src.ai.rag import reranker as reranker_module
@@ -55,11 +58,12 @@ class _FakeCrossEncoder:
 def _install(monkeypatch, *, fail_predict_times):
     _FakeCrossEncoder.instances = 0
     _FakeCrossEncoder.remaining_failures = fail_predict_times
-    import sentence_transformers
-
-    monkeypatch.setattr(
-        sentence_transformers, "CrossEncoder", lambda name, **kw: _FakeCrossEncoder(name),
-    )
+    # A stub module rather than patching the real one: requirements-ci.txt
+    # deliberately excludes sentence-transformers (it pulls in PyTorch), so
+    # importing it here would fail on CI before any assertion runs.
+    fake_module = types.ModuleType("sentence_transformers")
+    fake_module.CrossEncoder = lambda name, **kw: _FakeCrossEncoder(name)
+    monkeypatch.setitem(sys.modules, "sentence_transformers", fake_module)
 
 
 def test_a_model_that_cannot_predict_is_not_cached(monkeypatch):
