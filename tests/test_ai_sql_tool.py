@@ -122,3 +122,40 @@ def test_run_sql_rejects_unsafe_query_without_touching_the_database(monkeypatch)
         sql_tool.run_sql("DELETE FROM marts.customer_360")
 
     assert calls["n"] == 0
+
+
+def test_run_sql_connects_as_the_least_privilege_role_when_configured(monkeypatch):
+    from src.ai.tools import sql_tool
+
+    conn = _FakeSQLConn(rows=[(1,)], columns=["n"])
+    seen = {}
+
+    def _connect(**kwargs):
+        seen.update(kwargs)
+        return conn
+
+    monkeypatch.setenv("AI_SQL_POSTGRES_USER", "ai_sql_reader")
+    monkeypatch.setenv("AI_SQL_POSTGRES_PASSWORD", "secret")
+    monkeypatch.setattr(sql_tool, "get_pg_conn", _connect)
+
+    sql_tool.run_sql("SELECT 1 FROM marts.customer_360")
+
+    assert seen == {"user": "ai_sql_reader", "password": "secret"}
+
+
+def test_run_sql_uses_the_default_warehouse_credentials_when_no_role_is_configured(monkeypatch):
+    from src.ai.tools import sql_tool
+
+    conn = _FakeSQLConn(rows=[(1,)], columns=["n"])
+    seen = {}
+
+    def _connect(**kwargs):
+        seen.update(kwargs)
+        return conn
+
+    monkeypatch.delenv("AI_SQL_POSTGRES_USER", raising=False)
+    monkeypatch.setattr(sql_tool, "get_pg_conn", _connect)
+
+    sql_tool.run_sql("SELECT 1 FROM marts.customer_360")
+
+    assert seen == {}

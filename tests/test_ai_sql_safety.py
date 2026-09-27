@@ -93,3 +93,56 @@ def test_rejects_join_that_pulls_in_a_disallowed_table():
     q = "SELECT * FROM marts.customer_360 JOIN public.raw_customers ON true"
     with pytest.raises(SQLSafetyError, match="allowlist"):
         validate_sql(q)
+
+
+# Regressions: the allowlist used to be enforced by a regex that only saw
+# the first schema-qualified name after each FROM/JOIN keyword.
+
+def test_rejects_a_comma_join_to_a_disallowed_table():
+    with pytest.raises(SQLSafetyError, match="allowlist"):
+        validate_sql("SELECT * FROM marts.customer_360, public.raw_customers")
+
+
+def test_rejects_an_unqualified_system_table_in_a_subquery():
+    q = "SELECT (SELECT string_agg(usename, ',') FROM pg_user) FROM marts.customer_360"
+    with pytest.raises(SQLSafetyError, match="allowlist"):
+        validate_sql(q)
+
+
+def test_rejects_a_disallowed_table_in_a_where_subquery():
+    q = "SELECT * FROM marts.customer_360 WHERE customer_id IN (SELECT customer_id FROM public.raw_customers)"
+    with pytest.raises(SQLSafetyError, match="allowlist"):
+        validate_sql(q)
+
+
+def test_rejects_a_disallowed_table_in_a_union_branch():
+    with pytest.raises(SQLSafetyError, match="allowlist"):
+        validate_sql("SELECT customer_id FROM marts.customer_360 UNION SELECT customer_id FROM public.raw_customers")
+
+
+def test_rejects_a_table_valued_function_as_a_from_source():
+    with pytest.raises(SQLSafetyError, match="allowlist"):
+        validate_sql("SELECT * FROM generate_series(1, 1000000000)")
+
+
+@pytest.mark.parametrize("call", [
+    "pg_read_file('/etc/passwd')", "pg_sleep(10)", "current_setting('data_directory')",
+    "version()", "query_to_xml('select 1', true, true, '')", "dblink('x', 'y')",
+])
+def test_rejects_system_and_admin_functions(call):
+    with pytest.raises(SQLSafetyError, match="forbidden function"):
+        validate_sql(f"SELECT {call} FROM marts.customer_360")
+
+
+def test_accepts_ordinary_aggregates_and_a_subquery_over_allowed_tables():
+    q = (
+        "SELECT contract_type, COUNT(*), AVG(monthly_charges) FROM marts.customer_360 "
+        "WHERE customer_id IN (SELECT customer_id FROM marts.customer_360 WHERE churn = 1) "
+        "GROUP BY contract_type"
+    )
+    assert validate_sql(q) == q
+
+
+def test_rejects_unparseable_sql():
+    with pytest.raises(SQLSafetyError, match="parse"):
+        validate_sql("SELECT FROM FROM marts.customer_360 WHERE (")

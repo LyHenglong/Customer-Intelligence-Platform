@@ -26,13 +26,15 @@ import pandas as pd
 import psycopg2
 
 
-def get_pg_conn():
+def get_pg_conn(user: str | None = None, password: str | None = None):
+    """user/password override POSTGRES_USER/POSTGRES_PASSWORD - used by the
+    AI SQL tool to connect as its least-privilege role instead."""
     return psycopg2.connect(
         host=os.environ.get("POSTGRES_HOST", "localhost"),
         port=os.environ.get("POSTGRES_PORT", "5432"),
         dbname=os.environ.get("POSTGRES_DB", "warehouse"),
-        user=os.environ.get("POSTGRES_USER"),
-        password=os.environ.get("POSTGRES_PASSWORD"),
+        user=user or os.environ.get("POSTGRES_USER"),
+        password=password or os.environ.get("POSTGRES_PASSWORD"),
         # "prefer" (not the previously-implicit default), so the same code
         # connects to both the local Docker Postgres (no SSL configured)
         # and a hosted provider like Neon (SSL required) without a

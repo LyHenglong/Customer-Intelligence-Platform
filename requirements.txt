@@ -44,6 +44,11 @@ shap==0.46.0
 # compatible client, pointed at Groq's API (fast, generous free tier).
 groq==1.7.0
 
+# SQL parsing for the AI assistant's SQL guardrail (src/ai/guardrails/
+# sql_safety.py) - finds every table a query touches, including comma joins
+# and subqueries a regex misses. Pure Python, no transitive deps.
+sqlglot==25.34.1
+
 # AI assistant RAG layer (src/ai/rag/). sentence-transformers (local
 # embedding + cross-encoder reranking models, no external API key) is
 # deliberately NOT in docker/requirements-airflow.txt: it pulls in

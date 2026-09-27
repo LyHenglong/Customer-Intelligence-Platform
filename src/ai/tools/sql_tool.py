@@ -9,11 +9,17 @@ would be rejected by Postgres even if a future validation gap let one
 through), a statement timeout bounds runaway queries, and results are
 capped at SQL_ROW_LIMIT rows - this tool never returns an unbounded
 result set.
+
+When AI_SQL_POSTGRES_USER is set, the tool connects as that role instead
+of the warehouse owner. db/ai_readonly_role.sql creates it with SELECT on
+the allowlisted tables only, so Postgres itself enforces the allowlist -
+the strongest layer, since it does not depend on parsing the query right.
 """
 
 from __future__ import annotations
 
 import logging
+import os
 import time
 
 from src.ai.config import SQL_ROW_LIMIT, SQL_STATEMENT_TIMEOUT_MS
@@ -24,10 +30,17 @@ from src.warehouse import get_pg_conn
 log = logging.getLogger("ai.sql_tool")
 
 
+def _sql_role_credentials() -> dict:
+    user = os.environ.get("AI_SQL_POSTGRES_USER")
+    if not user:
+        return {}
+    return {"user": user, "password": os.environ.get("AI_SQL_POSTGRES_PASSWORD")}
+
+
 def run_sql(query: str) -> SQLQueryResult:
     validated = validate_sql(query)
 
-    conn = get_pg_conn()
+    conn = get_pg_conn(**_sql_role_credentials())
     try:
         # Not autocommit: SET LOCAL only applies for the current
         # transaction, so it and the query itself must run in the same
