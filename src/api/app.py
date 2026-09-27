@@ -16,13 +16,13 @@ from contextlib import asynccontextmanager
 from fastapi import Depends, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from src.api import state
+from src.api import observability, state
 from src.api.routers import assistant, dashboard, models
 from src.api.security import auth_enabled, require_api_key
 
 os.environ.setdefault("LOKY_MAX_CPU_COUNT", str(os.cpu_count() or 4))
 
-logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
+observability.configure_logging()
 log = logging.getLogger("api")
 
 # Eager warming is fine on a 3GB local container but OOM-killed Render's
@@ -112,6 +112,7 @@ app = FastAPI(
     lifespan=lifespan,
     dependencies=[Depends(require_api_key)],
 )
+observability.install(app)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=_CORS_ORIGINS,

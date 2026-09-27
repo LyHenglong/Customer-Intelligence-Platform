@@ -49,6 +49,10 @@ groq==1.7.0
 # and subqueries a regex misses. Pure Python, no transitive deps.
 sqlglot==25.34.1
 
+# Prometheus metrics endpoint for the serving API (src/api/observability.py).
+# Pure Python, no transitive deps.
+prometheus-client==0.21.1
+
 # AI assistant RAG layer (src/ai/rag/). sentence-transformers (local
 # embedding + cross-encoder reranking models, no external API key) is
 # deliberately NOT in docker/requirements-airflow.txt: it pulls in
