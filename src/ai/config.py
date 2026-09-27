@@ -17,7 +17,7 @@ SQL_STATEMENT_TIMEOUT_MS = int(os.environ.get("AI_SQL_STATEMENT_TIMEOUT_MS", "50
 
 # Allowlist, not a denylist: only these tables/views may appear in a
 # generated query's FROM/JOIN clauses. Matches
-# AI_Customer_Intelligence_Claude_Code_Plan.md section 9's recommended set -
+# docs/ai_layer_build_plan.md section 9's recommended set -
 # every table an AI-generated query is allowed to touch, never the full
 # warehouse (raw_customers/customers_cleaned/llm_explanations are excluded
 # on purpose: raw layers and cached LLM output aren't meant for ad hoc

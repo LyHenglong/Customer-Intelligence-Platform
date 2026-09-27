@@ -1,5 +1,5 @@
 """Tests for the AI tool layer (src/ai/tools/) - Phase 1 of the AI
-assistant architecture (see AI_Customer_Intelligence_Claude_Code_Plan.md).
+assistant architecture (see docs/ai_layer_build_plan.md).
 
 Deliberately built on synthetic in-memory data and fake Postgres
 connections, like test_model.py and test_dashboard.py - no live database,

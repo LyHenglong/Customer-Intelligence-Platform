@@ -1,7 +1,7 @@
 """Citation guardrail: every citation returned to the caller must
 correspond to a real piece of evidence gathered for this answer - never
 a fabricated source, page, or document
-(AI_Customer_Intelligence_Claude_Code_Plan.md section 17: "Do not
+(docs/ai_layer_build_plan.md section 17: "Do not
 fabricate page numbers or document metadata").
 """
 

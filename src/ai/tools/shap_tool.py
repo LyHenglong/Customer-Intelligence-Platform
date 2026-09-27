@@ -2,7 +2,7 @@
 
 Thin wrapper around src/model/explain_churn.py's compute_shap_details. The
 LLM never computes SHAP values itself - this is the only place they're
-produced (AI_Customer_Intelligence_Claude_Code_Plan.md section 8: "Reuse
+produced (docs/ai_layer_build_plan.md section 8: "Reuse
 the existing SHAP implementation. Do not ask the LLM to calculate SHAP.").
 """
 

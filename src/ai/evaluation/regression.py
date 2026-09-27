@@ -1,5 +1,5 @@
 """Lightweight regression sample of the full benchmark
-(AI_Customer_Intelligence_Claude_Code_Plan.md sections 21 and 30): a
+(docs/ai_layer_build_plan.md sections 21 and 30): a
 small, stratified subset (a fixed number of questions per route) for a
 fast sanity check after a change, without waiting on the full
 120-question run.
@@ -8,7 +8,7 @@ Like src/ai/evaluation/benchmark.py, this needs live infra (Postgres, an
 ingested RAG corpus, GROQ_API_KEY) - there is no mocked substitute, since
 a regression check against fake data would not actually catch a
 regression. It is deliberately NOT wired into CI (see .github/workflows/ci.yml
-and AI_Customer_Intelligence_Claude_Code_Plan.md section 30: "CI must not
+and docs/ai_layer_build_plan.md section 30: "CI must not
 require... live vector database... live external website") - this is a
 local/manual pre-release check, not an automated gate.
 

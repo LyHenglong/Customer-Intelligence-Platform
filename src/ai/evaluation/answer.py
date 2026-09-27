@@ -1,4 +1,4 @@
-"""Answer-quality metrics (AI_Customer_Intelligence_Claude_Code_Plan.md
+"""Answer-quality metrics (docs/ai_layer_build_plan.md
 section 20).
 
 Implemented as lightweight, inspectable proxies in plain Python rather

@@ -1,4 +1,4 @@
-"""LLM provider abstraction (AI_Customer_Intelligence_Claude_Code_Plan.md
+"""LLM provider abstraction (docs/ai_layer_build_plan.md
 section 23 / Phase 7).
 
 GroqProvider wraps the existing src/agents/groq_client.py rather than

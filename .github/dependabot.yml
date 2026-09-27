@@ -1,0 +1,38 @@
+# Weekly, grouped update PRs. Grouping keeps it to a handful of PRs rather
+# than one per package; CI runs on each, so a breaking bump shows up red.
+version: 2
+updates:
+  - package-ecosystem: pip
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    groups:
+      python:
+        patterns: ["*"]
+    ignore:
+      # Pinned to Airflow 2.10's bundled version so pickled models stay
+      # loadable across the Airflow and API images (see requirements.txt).
+      - dependency-name: dill
+
+  - package-ecosystem: npm
+    directory: /frontend
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    groups:
+      frontend:
+        patterns: ["*"]
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      actions:
+        patterns: ["*"]
+
+  - package-ecosystem: docker
+    directory: /docker
+    schedule:
+      interval: monthly

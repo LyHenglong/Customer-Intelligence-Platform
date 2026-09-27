@@ -1,4 +1,4 @@
-"""Retrieval-quality metrics (AI_Customer_Intelligence_Claude_Code_Plan.md
+"""Retrieval-quality metrics (docs/ai_layer_build_plan.md
 section 19): Recall@K, Precision@K, Hit@K, MRR, nDCG@K. Pure functions
 over a ranked list of ids and a set of relevant ids - no dependency on
 how those ids were produced, so the same functions score BM25-only,
@@ -81,7 +81,7 @@ def aggregate_metrics(runs: list[tuple[list[str], set[str]]], k: int = 5) -> dic
 
 def compare_retrieval_methods(query: str, top_k: int = 5) -> dict[str, list[str]]:
     """Runs the same query through each retrieval method
-    (AI_Customer_Intelligence_Claude_Code_Plan.md section 19's
+    (docs/ai_layer_build_plan.md section 19's
     comparison: vector only / BM25 only / hybrid / hybrid + reranker)
     and returns each method's ranked document_id list. Requires a live
     Postgres connection with an ingested RAG corpus and (for the

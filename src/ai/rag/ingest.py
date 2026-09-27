@@ -4,7 +4,7 @@ chunks, embeds, and indexes them into pgvector (public.rag_chunks).
 Idempotent: chunk_id is a stable hash of (document_id, strategy, chunk
 index), and each document's existing chunks are deleted before its new
 ones are inserted, so running this command twice does not duplicate
-chunks (AI_Customer_Intelligence_Claude_Code_Plan.md section 33).
+chunks (docs/ai_layer_build_plan.md section 33).
 
 Usage:
     python -m src.ai.rag.ingest [--strategy fixed|overlapping|structure_aware]

@@ -1,5 +1,5 @@
 """Approximate LLM cost estimation
-(AI_Customer_Intelligence_Claude_Code_Plan.md section 22's "estimated
+(docs/ai_layer_build_plan.md section 22's "estimated
 cost" trace field).
 
 The prices below are illustrative placeholders, not verified against

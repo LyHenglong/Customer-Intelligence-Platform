@@ -1,0 +1,23 @@
+# Install with `make install-dev` (or `pip install pre-commit && pre-commit install`).
+repos:
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.13.3  # keep in sync with requirements-ci.txt
+    hooks:
+      - id: ruff-check
+        args: [--fix]
+      - id: ruff-format
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v5.0.0
+    hooks:
+      - id: check-yaml
+        exclude: ^dbt/
+      - id: check-merge-conflict
+      - id: check-added-large-files
+        # The two served model artifacts are committed on purpose (see .gitignore).
+        args: [--maxkb=1024]
+        exclude: ^models_store/
+      - id: detect-private-key
+      - id: end-of-file-fixer
+        exclude: ^(models_store|report)/|\.ipynb$
+      - id: trailing-whitespace
+        exclude: ^(models_store|report)/|\.md$

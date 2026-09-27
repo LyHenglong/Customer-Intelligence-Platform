@@ -2,7 +2,7 @@
 lists with Reciprocal Rank Fusion, then hands the fused pool to the
 cross-encoder reranker (src/ai/rag/reranker.py).
 
-AI_Customer_Intelligence_Claude_Code_Plan.md section 12's pipeline:
+docs/ai_layer_build_plan.md section 12's pipeline:
 BM25 top 20 + Vector top 20 -> RRF -> top 20 -> Cross Encoder -> top 5.
 """
 
@@ -40,7 +40,7 @@ def hybrid_search(
 ) -> list[RetrievalCandidate]:
     """Full pipeline: BM25 top-N + vector top-N -> RRF fusion -> optional
     cross-encoder rerank -> top_k_final results with retrieval metadata
-    (AI_Customer_Intelligence_Claude_Code_Plan.md section 12's citation
+    (docs/ai_layer_build_plan.md section 12's citation
     shape: document_id, chunk_id, score, rank, retrieval_method)."""
     sparse = bm25_search(query, top_k=top_k_candidates)
     dense = vector_search(embed_query(query), top_k=top_k_candidates)

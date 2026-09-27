@@ -1,5 +1,5 @@
 """Rule-based query classification
-(AI_Customer_Intelligence_Claude_Code_Plan.md section 14).
+(docs/ai_layer_build_plan.md section 14).
 
 Deterministic and LLM-free on purpose: classification gates which tools
 run, and a routing mistake is far easier to write a regression test for

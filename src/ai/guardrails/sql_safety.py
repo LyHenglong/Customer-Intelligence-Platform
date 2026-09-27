@@ -2,7 +2,7 @@
 (src/ai/tools/sql_tool.py).
 
 The LLM never gets raw Postgres credentials or an unrestricted connection
-(AI_Customer_Intelligence_Claude_Code_Plan.md section 9) - every candidate
+(docs/ai_layer_build_plan.md section 9) - every candidate
 query is validated here first: single statement, no comments (a classic
 way to smuggle a second statement past a naive check), SELECT-only, no
 DDL/DML keywords, no system/admin functions, and restricted to an

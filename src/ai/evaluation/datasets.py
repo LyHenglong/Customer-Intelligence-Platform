@@ -1,5 +1,5 @@
 """Evaluation dataset: 120 benchmark questions across the 6 categories
-AI_Customer_Intelligence_Claude_Code_Plan.md section 18 specifies -
+docs/ai_layer_build_plan.md section 18 specifies -
 30 SQL/data, 20 customer-specific, 20 ML/churn, 20 RAG, 20 multi-source,
 10 unsupported/adversarial (120 total, meeting the "at least 100"
 requirement).

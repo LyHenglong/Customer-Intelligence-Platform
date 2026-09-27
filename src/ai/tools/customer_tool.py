@@ -1,5 +1,5 @@
 """customer_lookup and customer_search tools - Phase 1 of the AI tool
-layer (see AI_Customer_Intelligence_Claude_Code_Plan.md section 8).
+layer (see docs/ai_layer_build_plan.md section 8).
 
 Both reuse the existing warehouse access layer (src/warehouse.py) and the
 same churn/recommender artifacts the FastAPI service loads, rather than

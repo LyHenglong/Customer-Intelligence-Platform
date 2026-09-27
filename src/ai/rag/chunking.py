@@ -2,7 +2,7 @@
 (src/ai/rag/ingest.py).
 
 Three strategies are implemented, per
-AI_Customer_Intelligence_Claude_Code_Plan.md section 11's instruction not
+docs/ai_layer_build_plan.md section 11's instruction not
 to blindly pick one chunk size: "fixed", "overlapping", and
 "structure_aware". Which one performs best is a retrieval-quality
 question the evaluation harness (src/ai/evaluation/) answers by running

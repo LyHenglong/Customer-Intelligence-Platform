@@ -1,6 +1,6 @@
 """Hallucination-prevention guardrail: flags numeric claims in a
 generated answer that don't appear anywhere in the evidence that
-grounded it (AI_Customer_Intelligence_Claude_Code_Plan.md section 17).
+grounded it (docs/ai_layer_build_plan.md section 17).
 
 Deliberately a post-hoc text check, not constrained decoding or a
 retry-until-grounded loop: the generation prompt (src/ai/graph.py)

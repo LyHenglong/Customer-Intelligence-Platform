@@ -1,4 +1,4 @@
-"""Request tracing (AI_Customer_Intelligence_Claude_Code_Plan.md
+"""Request tracing (docs/ai_layer_build_plan.md
 section 22).
 
 Every /assistant/query request writes one row to public.ai_traces (see

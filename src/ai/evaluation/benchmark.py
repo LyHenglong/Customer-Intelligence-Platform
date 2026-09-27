@@ -1,5 +1,5 @@
 """Regression evaluation command
-(AI_Customer_Intelligence_Claude_Code_Plan.md section 21).
+(docs/ai_layer_build_plan.md section 21).
 
 Usage:
     python -m src.ai.evaluation.benchmark [--limit N]

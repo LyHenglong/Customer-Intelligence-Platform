@@ -1,5 +1,5 @@
 """Output validation - the "Validate" step in
-AI_Customer_Intelligence_Claude_Code_Plan.md section 13's workflow
+docs/ai_layer_build_plan.md section 13's workflow
 diagram. Applied only to a generated answer (never to the fixed
 UNSUPPORTED / insufficient-evidence templates in src/ai/graph.py, which
 aren't model output and need no validation).

@@ -1,5 +1,5 @@
 """Observability metrics computed from stored traces
-(AI_Customer_Intelligence_Claude_Code_Plan.md section 22's "minimum
+(docs/ai_layer_build_plan.md section 22's "minimum
 dashboard metrics"). Operates on trace dicts already fetched from
 Postgres (src/ai/observability/tracing.py's list_recent_traces) - pure
 aggregation with no database access of its own, so it's testable against

@@ -1,6 +1,6 @@
 """recommendation_analysis tool - wraps the existing content-based
 recommender. The agent receives the recommendation the recommender
-produced; it never invents one (AI_Customer_Intelligence_Claude_Code_Plan.md
+produced; it never invents one (docs/ai_layer_build_plan.md
 section 8).
 """
 

@@ -1,5 +1,5 @@
 """Explicit state-machine agent workflow
-(AI_Customer_Intelligence_Claude_Code_Plan.md section 13).
+(docs/ai_layer_build_plan.md section 13).
 
 Implemented as plain Python functions rather than a graph-orchestration
 framework (LangGraph): every node the plan's diagram describes - classify,

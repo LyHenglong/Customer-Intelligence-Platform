@@ -1,6 +1,6 @@
 """Controlled, read-only SQL tool - the only way the AI assistant layer
 runs a caller-supplied query against Postgres
-(AI_Customer_Intelligence_Claude_Code_Plan.md section 9).
+(docs/ai_layer_build_plan.md section 9).
 
 Every query is validated by src/ai/guardrails/sql_safety.py before it
 reaches the database. On top of that text-level check, the connection

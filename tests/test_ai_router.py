@@ -1,5 +1,5 @@
 """Tests for src/ai/router.py's rule-based query classification. Pure
-text logic, no DB, no LLM - see AI_Customer_Intelligence_Claude_Code_Plan.md
+text logic, no DB, no LLM - see docs/ai_layer_build_plan.md
 section 14 for the routing categories and example table this pins."""
 
 from __future__ import annotations

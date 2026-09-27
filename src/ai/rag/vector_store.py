@@ -3,7 +3,7 @@
 Adds one table, public.rag_chunks, to the same Postgres warehouse every
 other part of this platform already uses (src/warehouse.py) - no
 separate vector database service, per
-AI_Customer_Intelligence_Claude_Code_Plan.md section 4's instruction to
+docs/ai_layer_build_plan.md section 4's instruction to
 avoid unnecessary infrastructure. Requires the pgvector extension
 (CREATE EXTENSION IF NOT EXISTS vector, applied here and in
 db/schema.sql) and a pgvector-enabled Postgres image
