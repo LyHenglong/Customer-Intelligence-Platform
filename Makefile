@@ -4,7 +4,7 @@ PYTHON ?= python
 COMPOSE ?= docker compose
 
 .DEFAULT_GOAL := help
-.PHONY: help install install-dev lint format test test-integration coverage eval-retrieval \
+.PHONY: help install install-dev lint format test test-integration coverage eval-retrieval compare-models \
 	frontend-install frontend-check frontend-test up serve down dbt-build api
 
 help: ## Show this help
@@ -36,6 +36,9 @@ test-integration: ## Integration tests against a warehouse built as in CI (see .
 
 eval-retrieval: ## Offline BM25 retrieval quality over knowledge/
 	$(PYTHON) -m src.ai.evaluation.offline_retrieval --k 1
+
+compare-models: ## Benchmark Groq models on the real agent prompts (needs GROQ_API_KEY; ~30 cheap calls)
+	$(PYTHON) -m scripts.compare_groq_models --out report/groq_model_comparison.md
 
 frontend-install: ## Install frontend dependencies
 	cd frontend && npm ci
