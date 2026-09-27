@@ -17,31 +17,33 @@ export default function AtRiskPage() {
   const [threshold, setThreshold] = useState<number | null>(null);
   const [offset, setOffset] = useState(0);
   const [data, setData] = useState<AtRiskListResponse | null>(null);
-  const [loading, setLoading] = useState(true);
+  // Which request the current data/error belong to. Loading is derived from
+  // it rather than set synchronously inside the effect.
+  const requestKey = `${threshold}:${offset}`;
+  const [loadedKey, setLoadedKey] = useState<string | null>(null);
+  const loading = loadedKey !== requestKey;
   const [error, setError] = useState<string | null>(null);
   const [drafts, setDrafts] = useState<Record<string, OutreachDraftResponse | "loading" | "error">>({});
 
   useEffect(() => {
     let cancelled = false;
-    setLoading(true);
-    setError(null);
     getAtRisk(threshold ?? undefined, PAGE_SIZE, offset)
       .then((res) => {
         if (cancelled) return;
         setData(res);
+        setError(null);
         setThreshold((prev) => prev ?? res.threshold);
       })
       .catch((e: unknown) => {
         if (!cancelled) setError(e instanceof ApiError ? e.message : "Failed to load at-risk customers.");
       })
       .finally(() => {
-        if (!cancelled) setLoading(false);
+        if (!cancelled) setLoadedKey(requestKey);
       });
     return () => {
       cancelled = true;
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [threshold, offset]);
+  }, [threshold, offset, requestKey]);
 
   function generateDraft(customerId: string) {
     setDrafts((prev) => ({ ...prev, [customerId]: "loading" }));

@@ -1,7 +1,11 @@
-// One typed fetch function per src/model/api.py endpoint. NEXT_PUBLIC_API_URL
-// is inlined into the browser bundle at BUILD time (Next.js convention for
-// NEXT_PUBLIC_* vars) - see docker/Dockerfile.frontend's comment on why
-// this means a wrong value needs a rebuild, not a restart.
+// One typed fetch function per API endpoint (src/api/routers/).
+//
+// By default requests go through this app's own server-side proxy
+// (app/api/backend/), which reads API_URL/API_KEY at runtime and keeps the
+// key out of the browser. Setting NEXT_PUBLIC_API_URL instead calls the
+// API directly from the browser - it is inlined into the bundle at BUILD
+// time, so a wrong value needs a rebuild, and it only works while the API
+// has no API_KEYS configured.
 
 import type {
   AssistantResponse,
@@ -17,7 +21,7 @@ import type {
   SegmentRatesResponse,
 } from "./types";
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
+const API_URL = process.env.NEXT_PUBLIC_API_URL || "/api/backend";
 
 export class ApiError extends Error {
   constructor(

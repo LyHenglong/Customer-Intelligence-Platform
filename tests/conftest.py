@@ -17,3 +17,17 @@ import pytest
 @pytest.fixture(autouse=True)
 def _no_live_mlflow_calls(monkeypatch):
     monkeypatch.delenv("MLFLOW_TRACKING_URI", raising=False)
+
+
+@pytest.fixture(autouse=True)
+def _isolated_api_security(monkeypatch):
+    """The LLM rate limiter is process-global, so without a reset one test's
+    calls count against the next. API_KEYS from a developer's shell would
+    likewise 401 every endpoint test that doesn't send a key."""
+    from src.api.security import llm_limiter
+
+    monkeypatch.delenv("API_KEYS", raising=False)
+    monkeypatch.delenv("TRUST_PROXY_HEADERS", raising=False)
+    llm_limiter.reset()
+    yield
+    llm_limiter.reset()

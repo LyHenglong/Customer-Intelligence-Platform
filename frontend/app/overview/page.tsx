@@ -60,12 +60,14 @@ export default function OverviewPage() {
   const [pipeline, setPipeline] = useState<PipelineStatusResponse | null>(null);
   const [models, setModels] = useState<ModelVersionMetadata[]>([]);
   const [error, setError] = useState<string | null>(null);
-  const [loading, setLoading] = useState(true);
+  // Loading is derived from which threshold the current data belongs to,
+  // rather than set synchronously inside the effect.
+  const requestKey = String(threshold);
+  const [loadedKey, setLoadedKey] = useState<string | null>(null);
+  const loading = loadedKey !== requestKey;
 
   useEffect(() => {
     let cancelled = false;
-    setLoading(true);
-    setError(null);
 
     Promise.all([
       getOverviewStats(threshold ?? undefined),
@@ -83,20 +85,20 @@ export default function OverviewPage() {
         setTenureRates(tenureRes);
         setPipeline(pipelineRes);
         setModels(modelsRes.versions);
+        setError(null);
         setThreshold((prev) => prev ?? statsRes.threshold_used);
       })
       .catch((e: unknown) => {
         if (!cancelled) setError(e instanceof ApiError ? e.message : "Failed to load overview data.");
       })
       .finally(() => {
-        if (!cancelled) setLoading(false);
+        if (!cancelled) setLoadedKey(requestKey);
       });
 
     return () => {
       cancelled = true;
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [threshold]);
+  }, [threshold, requestKey]);
 
   if (error) return <ErrorState message={error} />;
   if (loading && !stats) return <LoadingState label="Scoring the full customer population - this can take a moment on first load..." />;

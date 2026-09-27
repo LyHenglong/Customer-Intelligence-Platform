@@ -15,26 +15,31 @@ export default function CustomersPage() {
   const [filters, setFilters] = useState<CustomerSearchFilters>({});
   const [offset, setOffset] = useState(0);
   const [data, setData] = useState<CustomerSearchResult | null>(null);
-  const [loading, setLoading] = useState(true);
+  // Loading is derived from which request the current result belongs to,
+  // rather than set synchronously inside the effect.
+  const requestKey = `${JSON.stringify(filters)}:${offset}`;
+  const [loadedKey, setLoadedKey] = useState<string | null>(null);
+  const loading = loadedKey !== requestKey;
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
-    setLoading(true);
     searchCustomers({ ...filters, limit: PAGE_SIZE, offset })
       .then((res) => {
-        if (!cancelled) setData(res);
+        if (cancelled) return;
+        setData(res);
+        setError(null);
       })
       .catch((e: unknown) => {
         if (!cancelled) setError(e instanceof ApiError ? e.message : "Search failed.");
       })
       .finally(() => {
-        if (!cancelled) setLoading(false);
+        if (!cancelled) setLoadedKey(requestKey);
       });
     return () => {
       cancelled = true;
     };
-  }, [filters, offset]);
+  }, [filters, offset, requestKey]);
 
   return (
     <div className="space-y-4">

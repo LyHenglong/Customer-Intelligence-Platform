@@ -76,6 +76,17 @@ services:
       # frontend service exists.
       - key: CORS_ALLOWED_ORIGINS
         sync: false
+      # API-key auth (src/api/security.py): every route except /health
+      # requires X-API-Key once this is set. The frontend's proxy route
+      # sends it (API_KEY on telecom-churn-frontend below), so browsers
+      # never see it.
+      - key: API_KEYS
+        sync: false
+      # Requests arrive via the frontend's proxy, so without trusted
+      # proxy headers every visitor shares one bucket - effectively a
+      # global cap on LLM spend, which is what a free-tier demo wants.
+      - key: LLM_RATE_LIMIT_PER_MINUTE
+        value: "30"
       # Eager startup warming (src/model/api.py's _warm_all) is fine on a
       # 3GB local Docker container but caused a real, confirmed OOM crash
       # loop on Render's free-tier memory ceiling - the RAG embedder +
@@ -132,4 +143,12 @@ services:
       # specifically - a plain env var update alone won't re-inline a
       # build-time value into the already-built bundle.
       - key: NEXT_PUBLIC_API_URL
+        sync: false
+      # Runtime settings for the server-side proxy route
+      # (frontend/app/api/backend/) - used when NEXT_PUBLIC_API_URL is left
+      # empty. API_URL is the api service's public URL; API_KEY must match
+      # one of its API_KEYS.
+      - key: API_URL
+        sync: false
+      - key: API_KEY
         sync: false

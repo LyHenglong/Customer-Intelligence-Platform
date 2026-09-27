@@ -20,18 +20,22 @@ import pytest
 from fastapi.testclient import TestClient
 
 from src.ai.schemas import CustomerLookupResult, CustomerProfile, CustomerSearchResult
-from src.model import api as api_module
+from src.api import app as app_module
+from src.api import state as api_state
+from src.api.routers import assistant as assistant_router
+from src.api.routers import dashboard as dashboard_router
+from src.api.routers import models as models_router
 from src.model import dashboard_queries
 
 # Captured before the autouse fixture below replaces the module attribute
 # with a no-op, so the few tests that exercise the warm itself can still
 # reach the real implementation.
-_REAL_WARM_SCORED_CACHE = api_module._warm_scored_cache
+_REAL_WARM_SCORED_CACHE = app_module._warm_scored_cache
 
 
 @pytest.fixture(autouse=True)
 def _isolate_api_state(monkeypatch):
-    """TestClient(api_module.app) as a context manager fires the real
+    """TestClient(app_module.app) as a context manager fires the real
     @app.on_event("startup") handler (load_models()) on every __enter__ -
     a genuine call to resolve_model_path()/MLflow/disk that would
     silently overwrite whatever _state this test set up, and secretly
@@ -39,7 +43,7 @@ def _isolate_api_state(monkeypatch):
     doing it). No-op it for this whole file - every test here manages
     _state itself instead. Also resets the module-level scored-customers
     cache, which would otherwise leak a DataFrame between tests."""
-    monkeypatch.setattr(api_module, "load_models", lambda: None)
+    monkeypatch.setattr(app_module, "load_models", lambda: None)
     # The startup handler also kicks off a background thread that scores the
     # whole population to warm _scored_cache. Left alone it hits the real
     # warehouse from every TestClient context, races the fake data these
@@ -47,7 +51,7 @@ def _isolate_api_state(monkeypatch):
     # the target works where patching the handler does not: FastAPI captured
     # start_cache_warm at decoration time, but it resolves
     # _warm_scored_cache from module globals when it runs.
-    monkeypatch.setattr(api_module, "_warm_all", lambda: None)
+    monkeypatch.setattr(app_module, "_warm_all", lambda: None)
     # The scored-population cache moved to dashboard_queries so the AI tool
     # layer could share it; clearing it here keeps one test's fake frame
     # from leaking into the next.
@@ -62,8 +66,8 @@ def fake_churn_state(monkeypatch):
     every test here monkeypatches the functions that would actually touch
     it (dashboard_queries.score_all_customers, compute_shap_details,
     etc.) rather than exercising real ML math."""
-    monkeypatch.setitem(api_module._state, "churn", {"pipeline": object(), "threshold": 0.3})
-    monkeypatch.setitem(api_module._state, "churn_version", "TESTV1")
+    monkeypatch.setitem(api_state.models, "churn", {"pipeline": object(), "threshold": 0.3})
+    monkeypatch.setitem(api_state.models, "churn_version", "TESTV1")
 
 
 def _scored_df():
@@ -93,8 +97,8 @@ def test_overview_stats_combines_the_expected_sources(monkeypatch, fake_churn_st
                         lambda: [{"version": "TESTV1", "roc_auc": 0.65}])
     monkeypatch.setattr(dashboard_queries, "column_importances", lambda pipeline: {"tenure": 0.4, "contract": 0.6})
 
-    with TestClient(api_module.app) as client:
-        monkeypatch.setitem(api_module._state, "churn_version", "TESTV1")
+    with TestClient(app_module.app) as client:
+        monkeypatch.setitem(api_state.models, "churn_version", "TESTV1")
         response = client.get("/overview/stats", params={"threshold": 0.3})
 
     assert response.status_code == 200
@@ -112,16 +116,16 @@ def test_warm_models_on_startup_defaults_true(monkeypatch):
     WARM_MODELS_ON_STARTUP=false, added after a real OOM crash loop on
     Render's free tier) should get the lazy-everything fallback."""
     monkeypatch.delenv("WARM_MODELS_ON_STARTUP", raising=False)
-    reloaded = importlib.reload(api_module)
+    reloaded = importlib.reload(app_module)
     try:
         assert reloaded._WARM_MODELS_ON_STARTUP is True
     finally:
-        importlib.reload(api_module)
+        importlib.reload(app_module)
 
 
 def test_warm_models_on_startup_false_skips_the_eager_warm(monkeypatch):
     monkeypatch.setenv("WARM_MODELS_ON_STARTUP", "false")
-    reloaded = importlib.reload(api_module)
+    reloaded = importlib.reload(app_module)
     warm_started = []
     try:
         monkeypatch.setattr(reloaded.threading, "Thread", lambda **kw: warm_started.append(kw) or type("T", (), {"start": lambda self: None})())
@@ -129,7 +133,7 @@ def test_warm_models_on_startup_false_skips_the_eager_warm(monkeypatch):
         assert warm_started == []  # no thread was ever created
     finally:
         monkeypatch.delenv("WARM_MODELS_ON_STARTUP", raising=False)
-        importlib.reload(api_module)
+        importlib.reload(app_module)
 
 
 def test_cache_warm_populates_the_scored_cache(monkeypatch, fake_churn_state):
@@ -149,7 +153,7 @@ def test_cache_warm_is_a_no_op_without_a_model(monkeypatch):
         raise AssertionError("scoring attempted with no churn model loaded")
 
     monkeypatch.setattr(dashboard_queries, "score_all_customers", _must_not_run)
-    monkeypatch.setitem(api_module._state, "churn", None)
+    monkeypatch.setitem(api_state.models, "churn", None)
 
     _REAL_WARM_SCORED_CACHE()  # must not raise
 
@@ -173,8 +177,8 @@ def test_overview_stats_503s_when_churn_model_not_loaded(monkeypatch):
     # runs (real load_models(), which would otherwise repopulate it from
     # whatever's actually on disk/MLflow) - setting it before entering the
     # `with` block gets silently overwritten.
-    with TestClient(api_module.app) as client:
-        monkeypatch.setitem(api_module._state, "churn", None)
+    with TestClient(app_module.app) as client:
+        monkeypatch.setitem(api_state.models, "churn", None)
         response = client.get("/overview/stats")
 
     assert response.status_code == 503
@@ -186,7 +190,7 @@ def test_overview_segment_rates_rejects_bad_column(monkeypatch):
 
     monkeypatch.setattr(dashboard_queries, "load_segment_rates", _raise)
 
-    with TestClient(api_module.app) as client:
+    with TestClient(app_module.app) as client:
         response = client.get("/overview/segment-rates", params={"column": "customer_id; DROP TABLE x"})
 
     assert response.status_code == 422
@@ -196,7 +200,7 @@ def test_overview_segment_rates_returns_buckets(monkeypatch):
     df = pd.DataFrame({"contract": ["month-to-month", "two_year"], "churn_rate": [0.4, 0.05], "n_customers": [500, 300]})
     monkeypatch.setattr(dashboard_queries, "load_segment_rates", lambda column: df)
 
-    with TestClient(api_module.app) as client:
+    with TestClient(app_module.app) as client:
         response = client.get("/overview/segment-rates", params={"column": "contract"})
 
     assert response.status_code == 200
@@ -209,7 +213,7 @@ def test_overview_segment_rates_returns_buckets(monkeypatch):
 def test_revenue_at_risk_by_segment_groups_correctly(monkeypatch, fake_churn_state):
     monkeypatch.setattr(dashboard_queries, "score_all_customers", lambda *a, **kw: _scored_df())
 
-    with TestClient(api_module.app) as client:
+    with TestClient(app_module.app) as client:
         response = client.get("/overview/revenue-at-risk-by-segment", params={"threshold": 0.3})
 
     assert response.status_code == 200
@@ -229,7 +233,7 @@ def test_revenue_at_risk_buckets_sum_to_the_overview_stats_headline(monkeypatch,
     monkeypatch.setattr(dashboard_queries, "load_all_churn_metadata", lambda: [{"roc_auc": 0.65}])
     monkeypatch.setattr(dashboard_queries, "column_importances", lambda pipeline: {})
 
-    with TestClient(api_module.app) as client:
+    with TestClient(app_module.app) as client:
         stats = client.get("/overview/stats", params={"threshold": 0.3}).json()
         buckets = client.get("/overview/revenue-at-risk-by-segment", params={"threshold": 0.3}).json()["buckets"]
 
@@ -239,7 +243,7 @@ def test_revenue_at_risk_buckets_sum_to_the_overview_stats_headline(monkeypatch,
 def test_revenue_at_risk_by_segment_supports_other_segment_columns(monkeypatch, fake_churn_state):
     monkeypatch.setattr(dashboard_queries, "score_all_customers", lambda *a, **kw: _scored_df())
 
-    with TestClient(api_module.app) as client:
+    with TestClient(app_module.app) as client:
         response = client.get(
             "/overview/revenue-at-risk-by-segment",
             params={"threshold": 0.3, "segment_column": "tenure_bucket"},
@@ -254,7 +258,7 @@ def test_revenue_at_risk_by_segment_supports_other_segment_columns(monkeypatch, 
 
 
 def test_revenue_at_risk_by_segment_rejects_bad_segment_column(fake_churn_state):
-    with TestClient(api_module.app) as client:
+    with TestClient(app_module.app) as client:
         response = client.get("/overview/revenue-at-risk-by-segment", params={"segment_column": "not_a_real_column"})
 
     assert response.status_code == 422
@@ -266,13 +270,13 @@ def test_revenue_at_risk_by_segment_rejects_bad_segment_column(fake_churn_state)
 def test_at_risk_clamps_max_rows_server_side(monkeypatch, fake_churn_state):
     monkeypatch.setattr(dashboard_queries, "score_all_customers", lambda *a, **kw: _scored_df())
     monkeypatch.setattr(dashboard_queries, "load_customers_by_id", lambda ids: pd.DataFrame({"customer_id": list(ids)}))
-    monkeypatch.setattr(api_module, "compute_shap_details", lambda pipeline, X, top_k: [[]])
+    monkeypatch.setattr(dashboard_router, "compute_shap_details", lambda pipeline, X, top_k: [[]])
 
-    with TestClient(api_module.app) as client:
+    with TestClient(app_module.app) as client:
         response = client.get("/at-risk", params={"threshold": 0.0, "max_rows": 10_000_000})
 
     assert response.status_code == 200
-    assert response.json()["max_rows_used"] == api_module._AT_RISK_MAX_ROWS
+    assert response.json()["max_rows_used"] == dashboard_router.AT_RISK_MAX_ROWS
 
 
 def test_at_risk_returns_customers_sorted_by_probability(monkeypatch, fake_churn_state):
@@ -281,10 +285,10 @@ def test_at_risk_returns_customers_sorted_by_probability(monkeypatch, fake_churn
         dashboard_queries, "load_customers_by_id",
         lambda ids: pd.DataFrame({"customer_id": list(ids), "contract": ["month-to-month"] * len(ids)}),
     )
-    monkeypatch.setattr(api_module, "compute_shap_details", lambda pipeline, X, top_k: [[{"feature": "tenure", "shap_value": 0.1, "direction": "increases risk"}]])
-    monkeypatch.setitem(api_module._state, "recommender", None)  # skip recommendation path
+    monkeypatch.setattr(dashboard_router, "compute_shap_details", lambda pipeline, X, top_k: [[{"feature": "tenure", "shap_value": 0.1, "direction": "increases risk"}]])
+    monkeypatch.setitem(api_state.models, "recommender", None)  # skip recommendation path
 
-    with TestClient(api_module.app) as client:
+    with TestClient(app_module.app) as client:
         response = client.get("/at-risk", params={"threshold": 0.0})
 
     assert response.status_code == 200
@@ -298,13 +302,13 @@ def test_at_risk_returns_customers_sorted_by_probability(monkeypatch, fake_churn
 
 
 def test_outreach_draft_soft_fails_when_no_recommendation(monkeypatch, fake_churn_state):
-    monkeypatch.setattr(api_module, "_get_explanation", lambda customer_id: {
+    monkeypatch.setattr(models_router, "_get_explanation", lambda customer_id: {
         "churn_probability": 0.8, "risk_factors": [], "explanation": "at risk", "source": "llm",
     })
-    monkeypatch.setitem(api_module._state, "recommender", object())
-    monkeypatch.setattr(api_module, "_recommend_with_fallback", lambda customer_id, top_n=1: [])
+    monkeypatch.setitem(api_state.models, "recommender", object())
+    monkeypatch.setattr(models_router, "_recommend_with_fallback", lambda customer_id, top_n=1: [])
 
-    with TestClient(api_module.app) as client:
+    with TestClient(app_module.app) as client:
         response = client.post("/outreach-draft/CUST0001")
 
     assert response.status_code == 200
@@ -315,23 +319,23 @@ def test_outreach_draft_soft_fails_when_no_recommendation(monkeypatch, fake_chur
 
 
 def test_outreach_draft_404s_when_customer_not_found(monkeypatch, fake_churn_state):
-    monkeypatch.setattr(api_module, "_get_explanation", lambda customer_id: None)
+    monkeypatch.setattr(models_router, "_get_explanation", lambda customer_id: None)
 
-    with TestClient(api_module.app) as client:
+    with TestClient(app_module.app) as client:
         response = client.post("/outreach-draft/does-not-exist")
 
     assert response.status_code == 404
 
 
 def test_outreach_draft_generates_when_a_service_is_recommended(monkeypatch, fake_churn_state):
-    monkeypatch.setattr(api_module, "_get_explanation", lambda customer_id: {
+    monkeypatch.setattr(models_router, "_get_explanation", lambda customer_id: {
         "churn_probability": 0.8, "risk_factors": [], "explanation": "at risk", "source": "llm",
     })
-    monkeypatch.setitem(api_module._state, "recommender", object())
-    monkeypatch.setattr(api_module, "_recommend_with_fallback", lambda customer_id, top_n=1: [{"service": "has_tech_support", "score": 0.9}])
-    monkeypatch.setattr(api_module, "get_or_generate", lambda customer_id, agent_type, version, generate_fn: "We'd love to offer you tech support.")
+    monkeypatch.setitem(api_state.models, "recommender", object())
+    monkeypatch.setattr(models_router, "_recommend_with_fallback", lambda customer_id, top_n=1: [{"service": "has_tech_support", "score": 0.9}])
+    monkeypatch.setattr(models_router, "get_or_generate", lambda customer_id, agent_type, version, generate_fn: "We'd love to offer you tech support.")
 
-    with TestClient(api_module.app) as client:
+    with TestClient(app_module.app) as client:
         response = client.post("/outreach-draft/CUST0001")
 
     assert response.status_code == 200
@@ -354,9 +358,9 @@ def test_search_customers_wraps_customer_search(monkeypatch):
         captured["offset"] = offset
         return canned
 
-    monkeypatch.setattr(api_module, "ai_customer_search", _fake_search)
+    monkeypatch.setattr(dashboard_router, "ai_customer_search", _fake_search)
 
-    with TestClient(api_module.app) as client:
+    with TestClient(app_module.app) as client:
         response = client.get("/customers", params={"contract": "month-to-month", "limit": 10})
 
     assert response.status_code == 200
@@ -366,9 +370,9 @@ def test_search_customers_wraps_customer_search(monkeypatch):
 
 
 def test_get_customer_returns_200_with_found_false_on_a_miss(monkeypatch):
-    monkeypatch.setattr(api_module, "ai_customer_lookup", lambda customer_id: CustomerLookupResult(customer_id=customer_id, found=False))
+    monkeypatch.setattr(dashboard_router, "ai_customer_lookup", lambda customer_id: CustomerLookupResult(customer_id=customer_id, found=False))
 
-    with TestClient(api_module.app) as client:
+    with TestClient(app_module.app) as client:
         response = client.get("/customers/does-not-exist")
 
     assert response.status_code == 200  # deliberate - not a 404, see the endpoint's docstring
@@ -383,11 +387,11 @@ def test_model_history_returns_raw_metadata_list(monkeypatch):
 
     # churn_version is set *inside* the context on purpose: TestClient's
     # __enter__ fires the real startup handler, which FastAPI captured at
-    # decoration time, so patching api_module.load_models beforehand does
+    # decoration time, so patching app_module.load_models beforehand does
     # not stop it repopulating _state. Same workaround as
     # test_overview_stats_503s_when_churn_model_not_loaded above.
-    with TestClient(api_module.app) as client:
-        monkeypatch.setitem(api_module._state, "churn_version", "V2")
+    with TestClient(app_module.app) as client:
+        monkeypatch.setitem(api_state.models, "churn_version", "V2")
         response = client.get("/model-history")
 
     assert response.status_code == 200
@@ -406,8 +410,8 @@ def test_model_history_reports_the_served_version_not_the_newest(monkeypatch):
     monkeypatch.setattr(dashboard_queries, "load_all_churn_metadata",
                         lambda: [{"version": "V1"}, {"version": "V2_NEWEST"}])
 
-    with TestClient(api_module.app) as client:
-        monkeypatch.setitem(api_module._state, "churn_version", "V1")
+    with TestClient(app_module.app) as client:
+        monkeypatch.setitem(api_state.models, "churn_version", "V1")
         body = client.get("/model-history").json()
 
     assert body["serving_version"] == "V1"
@@ -426,8 +430,8 @@ def test_overview_stats_auc_describes_the_served_model(monkeypatch, fake_churn_s
         {"version": "NEWER_BUT_NOT_SERVED", "roc_auc": 0.99},
     ])
 
-    with TestClient(api_module.app) as client:
-        monkeypatch.setitem(api_module._state, "churn_version", "TESTV1")
+    with TestClient(app_module.app) as client:
+        monkeypatch.setitem(api_state.models, "churn_version", "TESTV1")
         body = client.get("/overview/stats", params={"threshold": 0.3}).json()
 
     assert body["model_version"] == "TESTV1"
@@ -443,8 +447,8 @@ def test_overview_stats_auc_is_null_when_served_version_has_no_metadata(monkeypa
     monkeypatch.setattr(dashboard_queries, "load_all_churn_metadata",
                         lambda: [{"version": "SOMETHING_ELSE", "roc_auc": 0.99}])
 
-    with TestClient(api_module.app) as client:
-        monkeypatch.setitem(api_module._state, "churn_version", "TESTV1")
+    with TestClient(app_module.app) as client:
+        monkeypatch.setitem(api_state.models, "churn_version", "TESTV1")
         body = client.get("/overview/stats", params={"threshold": 0.3}).json()
 
     assert body["model_auc"] is None
@@ -454,9 +458,9 @@ def test_pipeline_status_combines_all_sources(monkeypatch):
     monkeypatch.setattr(dashboard_queries, "load_ingestion_log", lambda: pd.DataFrame({"batch_file": ["batch_001.csv"], "rows_loaded": [76924], "loaded_at": ["2026-01-01"], "status": ["success"]}))
     monkeypatch.setattr(dashboard_queries, "load_latest_drift", lambda: pd.DataFrame())
     monkeypatch.setattr(dashboard_queries, "load_all_churn_metadata", lambda: [{"version": "V1"}])
-    monkeypatch.setattr(api_module, "get_latest_retrain_summary", lambda: {"summary_text": "improved"})
+    monkeypatch.setattr(dashboard_router, "get_latest_retrain_summary", lambda: {"summary_text": "improved"})
 
-    with TestClient(api_module.app) as client:
+    with TestClient(app_module.app) as client:
         response = client.get("/pipeline-status")
 
     assert response.status_code == 200
@@ -472,19 +476,19 @@ def test_pipeline_status_combines_all_sources(monkeypatch):
 
 def test_cors_allows_configured_origin(monkeypatch):
     monkeypatch.setenv("CORS_ALLOWED_ORIGINS", "http://localhost:3000")
-    reloaded = importlib.reload(api_module)
+    reloaded = importlib.reload(app_module)
     try:
         with TestClient(reloaded.app) as client:
             response = client.get("/health", headers={"Origin": "http://localhost:3000"})
         assert response.headers.get("access-control-allow-origin") == "http://localhost:3000"
     finally:
         monkeypatch.delenv("CORS_ALLOWED_ORIGINS", raising=False)
-        importlib.reload(api_module)  # restore the module other tests in the suite import
+        importlib.reload(app_module)  # restore the module other tests in the suite import
 
 
 def test_cors_blocks_unconfigured_origin_by_default(monkeypatch):
     monkeypatch.delenv("CORS_ALLOWED_ORIGINS", raising=False)
-    reloaded = importlib.reload(api_module)
+    reloaded = importlib.reload(app_module)
 
     with TestClient(reloaded.app) as client:
         response = client.get("/health", headers={"Origin": "http://evil.example.com"})

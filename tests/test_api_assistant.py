@@ -10,7 +10,11 @@ import pytest
 from fastapi.testclient import TestClient
 
 from src.ai.schemas import AssistantResponse
-from src.model import api as api_module
+from src.api import app as app_module
+from src.api import state as api_state
+from src.api.routers import assistant as assistant_router
+from src.api.routers import dashboard as dashboard_router
+from src.api.routers import models as models_router
 
 
 @pytest.fixture(autouse=True)
@@ -22,8 +26,8 @@ def _no_real_startup_work(monkeypatch):
     they hit the live warehouse and took this suite from seconds to
     minutes. Patching the thread's target works where patching the handler
     does not, since FastAPI captured the handler at decoration time."""
-    monkeypatch.setattr(api_module, "load_models", lambda: None)
-    monkeypatch.setattr(api_module, "_warm_all", lambda: None)
+    monkeypatch.setattr(app_module, "load_models", lambda: None)
+    monkeypatch.setattr(app_module, "_warm_all", lambda: None)
 
 
 def test_assistant_query_returns_the_graph_result(monkeypatch):
@@ -32,9 +36,9 @@ def test_assistant_query_returns_the_graph_result(monkeypatch):
         citations=[], evidence=[], tools_used=["churn_analysis"],
         model_version="V1", route="ML_ANALYSIS", trace_id="abc123", latency_ms=12.3,
     )
-    monkeypatch.setattr(api_module, "ai_run_query", lambda query: canned)
+    monkeypatch.setattr(assistant_router, "ai_run_query", lambda query: canned)
 
-    with TestClient(api_module.app) as client:
+    with TestClient(app_module.app) as client:
         response = client.post("/assistant/query", json={"query": "Why is churn increasing?"})
 
     assert response.status_code == 200
@@ -48,16 +52,16 @@ def test_assistant_query_rejects_empty_query(monkeypatch):
     def _should_not_be_called(query):
         raise AssertionError("run_query must not be called for an empty query")
 
-    monkeypatch.setattr(api_module, "ai_run_query", _should_not_be_called)
+    monkeypatch.setattr(assistant_router, "ai_run_query", _should_not_be_called)
 
-    with TestClient(api_module.app) as client:
+    with TestClient(app_module.app) as client:
         response = client.post("/assistant/query", json={"query": "   "})
 
     assert response.status_code == 422
 
 
 def test_assistant_query_rejects_missing_query_field():
-    with TestClient(api_module.app) as client:
+    with TestClient(app_module.app) as client:
         response = client.post("/assistant/query", json={})
 
     assert response.status_code == 422  # pydantic: "query" is a required field
@@ -71,9 +75,9 @@ def test_assistant_query_accepts_optional_conversation_id(monkeypatch):
         captured["query"] = query
         return canned
 
-    monkeypatch.setattr(api_module, "ai_run_query", _fake_run_query)
+    monkeypatch.setattr(assistant_router, "ai_run_query", _fake_run_query)
 
-    with TestClient(api_module.app) as client:
+    with TestClient(app_module.app) as client:
         response = client.post(
             "/assistant/query", json={"query": "hello", "conversation_id": "conv-1"}
         )
@@ -84,9 +88,9 @@ def test_assistant_query_accepts_optional_conversation_id(monkeypatch):
 
 def test_assistant_trace_returns_the_stored_trace(monkeypatch):
     canned_trace = {"trace_id": "t1", "route": "ML_ANALYSIS", "total_latency_ms": 42.0}
-    monkeypatch.setattr(api_module, "ai_get_trace", lambda trace_id: canned_trace)
+    monkeypatch.setattr(assistant_router, "ai_get_trace", lambda trace_id: canned_trace)
 
-    with TestClient(api_module.app) as client:
+    with TestClient(app_module.app) as client:
         response = client.get("/assistant/trace/t1")
 
     assert response.status_code == 200
@@ -94,9 +98,9 @@ def test_assistant_trace_returns_the_stored_trace(monkeypatch):
 
 
 def test_assistant_trace_404s_when_not_found(monkeypatch):
-    monkeypatch.setattr(api_module, "ai_get_trace", lambda trace_id: None)
+    monkeypatch.setattr(assistant_router, "ai_get_trace", lambda trace_id: None)
 
-    with TestClient(api_module.app) as client:
+    with TestClient(app_module.app) as client:
         response = client.get("/assistant/trace/does-not-exist")
 
     assert response.status_code == 404

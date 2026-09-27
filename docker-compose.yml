@@ -237,6 +237,9 @@ services:
       # src/model/api.py's own comment on why this is read at import
       # time (restart needed on change).
       CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-http://localhost:3000}
+      # Optional API-key auth and LLM rate limit - see src/api/security.py.
+      API_KEYS: ${API_KEYS:-}
+      LLM_RATE_LIMIT_PER_MINUTE: ${LLM_RATE_LIMIT_PER_MINUTE:-10}
     depends_on:
       - postgres
       - mlflow
@@ -275,14 +278,16 @@ services:
       context: .
       dockerfile: docker/Dockerfile.frontend
       args:
-        # Consumed by the BROWSER at build time, not this container at
-        # runtime - unlike AI_API_URL above (server-to-server, resolves
-        # "api" via the compose network fine), this must be a URL the
-        # end user's own browser can actually reach. "http://api:8000"
-        # here would silently resolve to nothing outside the compose
-        # network and break every page - see docker/Dockerfile.frontend
-        # and lib/api-client.ts's comments.
-        NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:8000}
+        # Empty (the default) routes browser requests through the
+        # frontend's own server-side proxy (app/api/backend/), which reaches
+        # the api over the compose network with API_URL/API_KEY below. Set
+        # it only to call the API directly from the browser - it must then
+        # be a URL the user's browser can reach, and the API must have no
+        # API_KEYS configured.
+        NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-}
+    environment:
+      API_URL: http://api:8000
+      API_KEY: ${API_KEY:-}
     ports:
       - "3000:3000"
     depends_on:
