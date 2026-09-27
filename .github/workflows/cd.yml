@@ -55,15 +55,9 @@ jobs:
           context: .
           file: docker/Dockerfile.${{ matrix.image }}
           push: true
-          # frontend only: NEXT_PUBLIC_API_URL is inlined into the browser
-          # bundle at build time (see docker/Dockerfile.frontend's own
-          # comment) and isn't known here, so this falls back to
-          # lib/api-client.ts's http://localhost:8000 default. Anyone
-          # self-hosting by pulling this published image with a real API
-          # URL needs to rebuild it themselves with their own
-          # --build-arg NEXT_PUBLIC_API_URL, same as Render/docker-compose
-          # already must - this publish step is not a usable end-to-end
-          # deploy artifact for frontend the way it is for api.
+          # frontend: built without NEXT_PUBLIC_API_URL, so the published
+          # image uses its server-side proxy route and is pointed at an API
+          # at runtime with API_URL (and API_KEY) - no rebuild per deploy.
           # Both a rolling `latest` and the immutable commit SHA - the SHA
           # tag is what makes a specific deploy reproducible/rollback-able;
           # `latest` is convenience for anyone just pulling the newest.

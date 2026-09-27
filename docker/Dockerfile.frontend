@@ -11,12 +11,11 @@ FROM node:20-slim AS builder
 WORKDIR /app
 COPY --from=deps /app/node_modules ./node_modules
 COPY frontend/ .
-# NEXT_PUBLIC_API_URL is inlined into the browser bundle at BUILD time,
-# not read at container runtime - see lib/api-client.ts's comment. Must
-# be passed as a --build-arg (docker-compose.yml's build.args, or
-# Render's build-time env), not just a runtime environment variable -
-# setting it only at `docker run` time has no effect on an already-built
-# bundle.
+# Optional. Left empty (the default), the browser calls this app's own
+# server-side proxy route, which reads API_URL/API_KEY at container
+# RUNTIME - so one image works against any API. Set, it is inlined into
+# the browser bundle at BUILD time for direct browser-to-API calls (see
+# lib/api-client.ts), and only takes effect via --build-arg.
 ARG NEXT_PUBLIC_API_URL
 ENV NEXT_PUBLIC_API_URL=$NEXT_PUBLIC_API_URL
 RUN npm run build
