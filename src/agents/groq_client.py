@@ -13,14 +13,10 @@ values, service recommendations, retrain metrics). It never influences a
 churn probability or a recommendation ranking - see the README's
 "AI Agent Layer" section.
 
-Two model tiers, matched to task complexity and call volume:
-  MODEL_QUALITY - explanation + outreach agents. Tone and grounding in the
-                  real SHAP numbers matter, and these run once per
-                  displayed at-risk customer, so quality is worth the cost.
-  MODEL_FAST    - retrain-summary agent. A more templated task (summarize
-                  a metrics table) that runs at most a few times per DAG
-                  run, so speed/cost matter more than the last mile of
-                  quality.
+Two model tiers, kept as separate names so they can diverge again:
+  MODEL_QUALITY - explanation + outreach agents and the AI assistant.
+  MODEL_FAST    - retrain-summary agent.
+Both currently resolve to GROQ_MODEL (default openai/gpt-oss-20b).
 """
 
 from __future__ import annotations
@@ -53,8 +49,13 @@ log = logging.getLogger("agents.groq_client")
 # the README's "AI Agent Layer" section and Deviations for the full story
 # - this is exactly the kind of pinned-model drift a real production
 # system has to handle, not papered over here.
-MODEL_QUALITY = "openai/gpt-oss-120b"
-MODEL_FAST = "openai/gpt-oss-20b"
+#
+# Both tiers now run on gpt-oss-20b: faster and cheaper than 120b, and the
+# agents only phrase data already in the prompt. GROQ_MODEL overrides it,
+# so the next catalog change needs an env var, not a code change.
+GROQ_MODEL = os.environ.get("GROQ_MODEL", "openai/gpt-oss-20b")
+MODEL_QUALITY = GROQ_MODEL
+MODEL_FAST = GROQ_MODEL
 
 # Both are reasoning models: they spend some of the completion token
 # budget on hidden chain-of-thought before the visible answer, even for a

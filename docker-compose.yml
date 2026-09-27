@@ -36,6 +36,7 @@ x-airflow-common: &airflow-common
     # Optional - see the README's "AI Agent Layer" section for the
     # fallback behavior when this is unset or Groq is unreachable.
     GROQ_API_KEY: ${GROQ_API_KEY:-}
+    GROQ_MODEL: ${GROQ_MODEL:-openai/gpt-oss-20b}
     # Drift/task-failure alerting (src/monitoring/alerting.py). Optional -
     # unset means send_slack_alert() is a no-op, same fallback convention
     # as GROQ_API_KEY above.
@@ -226,6 +227,7 @@ services:
       # AI Agent Layer: read by /explain-churn. Optional - see the
       # README's "AI Agent Layer" section for the fallback behavior.
       GROQ_API_KEY: ${GROQ_API_KEY:-}
+      GROQ_MODEL: ${GROQ_MODEL:-openai/gpt-oss-20b}
       # Model registry (src/model/registry.py) - best-effort, same
       # fallback-to-glob-latest behavior as everywhere else this is set.
       MLFLOW_TRACKING_URI: http://mlflow:5000
