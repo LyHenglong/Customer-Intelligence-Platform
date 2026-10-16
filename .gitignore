@@ -82,7 +82,3 @@ neon_migration.sql
 # agentRules) - tooling output, not authored source.
 frontend/AGENTS.md
 frontend/CLAUDE.md
-
-# Internal AI-agent build spec used to direct this project's development -
-# not portfolio-facing content, kept locally for reference only.
-AI_Customer_Intelligence_Claude_Code_Plan.md
