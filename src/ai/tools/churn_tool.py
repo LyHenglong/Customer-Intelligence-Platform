@@ -66,23 +66,38 @@ def clear_cache() -> None:
 
 
 def _from_scored_cache(filters: dict, churn_artifact, churn_version) -> ChurnAnalysisResult | None:
-    """Answers from the already-scored population if it is in memory.
+    """Answers from the already-scored population if it is either already
+    in memory, or cheap to fetch.
 
-    The serving process keeps every customer scored in
-    dashboard_queries' cache (warmed at API startup, an hour's TTL), and
-    since that frame carries the categorical segment columns plus the
-    churn label, every figure this tool returns can be computed from it
-    with a boolean mask. Re-streaming and re-scoring 1,000,000 rows from
-    Postgres to recompute what is already in RAM cost 209s of a measured
-    211s assistant request.
+    Always peeks first (dashboard_queries.peek_scored_customers): if some
+    other endpoint (e.g. /overview/stats) already warmed this process's
+    cache, reuse it for free. On a peek miss, this used to unconditionally
+    fall back to this tool's own live-scoring query - correct when nothing
+    but a full live pass exists (local/Docker, USE_PRECOMPUTED_SCORES
+    unset), but wrong on a deployment where dashboard_queries.
+    get_scored_customers can instead serve the same miss from the fast
+    public.churn_scores table (a single cheap SELECT, not a live scoring
+    pass) - see render.yaml's USE_PRECOMPUTED_SCORES. Without checking that
+    flag, an assistant question asked before any dashboard page had loaded
+    a process still paid for a full from-scratch re-streaming-and-scoring
+    of 1,000,000 rows (measured at 209s of a 211s request locally; far
+    worse under Render's free-tier CPU) - the exact cost the precomputed-
+    scores work was meant to eliminate, just never wired into this tool.
 
-    Returns None rather than computing the frame when the cache is cold:
-    the caller then does its own filtered query, which for a narrow
-    segment is far cheaper than a full population pass, and nobody waits
-    on somebody else's multi-minute scoring run."""
+    Only calls get_scored_customers (which can block on a live scoring
+    pass if the precomputed table has no rows for this version yet) when
+    precomputed_scores_enabled() says that risk doesn't apply. Otherwise
+    returns None so the caller falls back to its own bounded, filtered
+    query rather than triggering a full population pass under a cold miss."""
     if churn_artifact is None:
         return None
     frame = dashboard_queries.peek_scored_customers(churn_version)
+    if frame is None and dashboard_queries.precomputed_scores_enabled():
+        try:
+            frame = dashboard_queries.get_scored_customers(churn_artifact, churn_version)
+        except Exception:
+            log.exception("get_scored_customers failed; falling back to filtered live scoring")
+            return None
     if frame is None or "churn" not in frame.columns:
         return None
 

@@ -215,6 +215,13 @@ services:
       context: .
       dockerfile: docker/Dockerfile.api
     environment:
+      # Memory-constrained hosts (e.g. a Docker VM capped at 2GB) can't fit
+      # the RAG warmup or the in-process 1M-row scoring pass. Set both in
+      # .env: WARM_MODELS_ON_STARTUP=false and USE_PRECOMPUTED_SCORES=true,
+      # after running `python -m scripts.precompute_churn_scores` on the
+      # host. Defaults keep the original eager/live behavior.
+      WARM_MODELS_ON_STARTUP: ${WARM_MODELS_ON_STARTUP:-true}
+      USE_PRECOMPUTED_SCORES: ${USE_PRECOMPUTED_SCORES:-false}
       # /recommend falls back to a warehouse lookup when a customer isn't in
       # the recommender's bounded reference set - the common case at 1M
       # customers. Predictions and index hits still need no DB at all.

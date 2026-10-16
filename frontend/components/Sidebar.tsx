@@ -44,6 +44,16 @@ const NAV = [
     icon: icon(<><circle cx="12" cy="12" r="8.5" /><path d="M12 3.5v8.5h8.5" /></>),
   },
   {
+    href: "/insights",
+    label: "Insights",
+    icon: icon(<><path d="M12 2.5a5.5 5.5 0 0 0-3.2 9.98c.5.36.7.86.7 1.3v.72h5v-.72c0-.44.2-.94.7-1.3A5.5 5.5 0 0 0 12 2.5Z" /><path d="M10 18.5h4" /><path d="M10.5 21h3" /></>),
+  },
+  {
+    href: "/recommendations",
+    label: "Recommendations",
+    icon: icon(<><path d="M9 11.5 11 13.5 15.5 9" /><rect x="3.5" y="3.5" width="17" height="17" rx="3.5" /></>),
+  },
+  {
     href: "/model-performance",
     label: "Model Performance",
     icon: icon(<><path d="M3 20h18" /><path d="M6 20v-6" /><path d="M11 20V7" /><path d="M16 20v-9" /><path d="M21 20V4" /></>),
@@ -77,14 +87,22 @@ export default function Sidebar() {
     >
       <div className="flex h-16 items-center gap-2.5 px-5">
         <span
-          className="flex h-8 w-8 items-center justify-center rounded-lg text-sm font-bold text-white"
+          className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg"
           style={{ background: "var(--brand)" }}
           aria-hidden="true"
         >
-          R
+          {/* Retention Loop: an open ring whose gap is closed by a customer
+              dot - a customer kept in the loop. Echoes ChurnGauge's ring. */}
+          <svg viewBox="0 0 48 48" fill="none" className="h-8 w-8">
+            <path d="M34.63 21.15A11 11 0 1 1 21.15 13.37" stroke="white" strokeWidth="4.5" strokeLinecap="round" />
+            <circle cx="29.5" cy="14.47" r="2.8" fill="white" />
+          </svg>
         </span>
-        <span className="text-[15px] font-bold tracking-tight" style={{ color: "var(--text-primary)" }}>
-          Retention<span style={{ color: "var(--brand)" }}>CC</span>
+        {/* Stacked: "Customer Intelligence" on one line doesn't fit beside
+            the mark in a w-60 sidebar at a legible size. */}
+        <span className="flex flex-col text-[14px] font-bold leading-[1.15] tracking-tight">
+          <span style={{ color: "var(--text-primary)" }}>Customer</span>
+          <span style={{ color: "var(--brand-strong)" }}>Intelligence</span>
         </span>
       </div>
 

@@ -101,7 +101,7 @@ export default function ModelPerformancePage() {
   return (
     <div className="space-y-5">
       <PageHeader
-        eyebrow="Retention Command Center"
+        eyebrow="Customer Intelligence"
         title="Model performance"
         description="How the serving model scores, and how that has moved across retrains."
         action={

@@ -15,7 +15,7 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Retention Command Center",
+  title: "Customer Intelligence",
   description: "Telecom churn intelligence platform - real-time risk, retention, and model performance.",
 };
 
