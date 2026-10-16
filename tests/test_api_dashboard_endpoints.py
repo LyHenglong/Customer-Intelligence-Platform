@@ -48,6 +48,14 @@ def _isolate_api_state(monkeypatch):
     # start_cache_warm at decoration time, but it resolves
     # _warm_scored_cache from module globals when it runs.
     monkeypatch.setattr(api_module, "_warm_all", lambda: None)
+    # These tests exercise the live-scoring path via a mocked
+    # score_all_customers, not the public.churn_scores fast path (that one
+    # has its own dedicated tests in test_dashboard_queries.py). Forced off
+    # here regardless of the real environment's USE_PRECOMPUTED_SCORES -
+    # otherwise a dev machine with that flag set in .env (see render.yaml's
+    # same flag) makes get_scored_customers try a real, unmocked Postgres
+    # connection via load_precomputed_scores before ever reaching the mock.
+    monkeypatch.setattr(dashboard_queries, "_USE_PRECOMPUTED_SCORES", False)
     # The scored-population cache moved to dashboard_queries so the AI tool
     # layer could share it; clearing it here keeps one test's fake frame
     # from leaking into the next.
