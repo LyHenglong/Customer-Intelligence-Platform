@@ -50,9 +50,9 @@ log = logging.getLogger("agents.groq_client")
 # not an access issue). Replaced with the two nearest equivalents Groq
 # actually serves now: gpt-oss-120b/20b, OpenAI's open-weight reasoning
 # models, in the same quality/speed pairing as originally intended. See
-# the README's "AI Agent Layer" section and Deviations for the full story
-# - this is exactly the kind of pinned-model drift a real production
-# system has to handle, not papered over here.
+# the README's "AI Agent Layer" section and docs/ENGINEERING_LOG.md for
+# the full story - this is exactly the kind of pinned-model drift a real
+# production system has to handle, not papered over here.
 MODEL_QUALITY = "openai/gpt-oss-120b"
 MODEL_FAST = "openai/gpt-oss-20b"
 

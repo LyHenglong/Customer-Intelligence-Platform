@@ -108,9 +108,9 @@ services:
 
   - type: web
     name: telecom-churn-frontend
-    # The Next.js frontend (frontend/) - see README's "Deploying the API
-    # and the Next.js frontend to Render" section for why this and the
-    # API above exist as their own Render services.
+    # The Next.js frontend (frontend/) - see README's "Public demo
+    # deployment" section for why this and the API above exist as their
+    # own Render services.
     runtime: docker
     dockerfilePath: ./docker/Dockerfile.frontend
     dockerContext: .
