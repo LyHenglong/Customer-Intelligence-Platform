@@ -296,7 +296,7 @@ See [`docs/ENGINEERING_LOG.md`](docs/ENGINEERING_LOG.md) for the full verificati
 
 ## Author
 
-Ly Henglong (Penguin) — Final-year ICT student, American University of Phnom Penh, focused on data science and machine learning.
+Ly Henglong — Final-year ICT student, American University of Phnom Penh, focused on data science and machine learning.
 
 - LinkedIn: [linkedin.com/in/lyhenglong](https://linkedin.com/in/lyhenglong)
 - GitHub: [github.com/LyHenglong](https://github.com/LyHenglong)
