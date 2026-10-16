@@ -50,11 +50,14 @@ export default function ChurnBarChart({
   valueFormatter = (v: number) => v.toFixed(2),
   height = 260,
   layout = "vertical",
+  onBarClick,
 }: {
   data: BarDatum[];
   valueFormatter?: (value: number) => string;
   height?: number;
   layout?: "vertical" | "horizontal"; // "vertical" = bars stand up (categories on x); "horizontal" = bars lie flat
+  /** Optional: makes each bar clickable, e.g. to drill into that category's customers. */
+  onBarClick?: (label: string) => void;
 }) {
   return (
     <ResponsiveContainer width="100%" height={height}>
@@ -113,6 +116,8 @@ export default function ChurnBarChart({
           radius={layout === "horizontal" ? [0, 4, 4, 0] : [4, 4, 0, 0]}
           maxBarSize={48}
           isAnimationActive={false}
+          cursor={onBarClick ? "pointer" : undefined}
+          onClick={onBarClick ? (entry) => { const payload = entry.payload as BarDatum | undefined; if (payload) onBarClick(payload.label); } : undefined}
         >
           <LabelList
             dataKey="value"

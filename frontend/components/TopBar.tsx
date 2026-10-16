@@ -9,6 +9,8 @@ const NAV = [
   { href: "/at-risk", label: "At-Risk" },
   { href: "/customers", label: "Customers" },
   { href: "/segments", label: "Segments" },
+  { href: "/insights", label: "Insights" },
+  { href: "/recommendations", label: "Recommendations" },
   { href: "/model-performance", label: "Model" },
   { href: "/pipeline-status", label: "Pipeline" },
   { href: "/assistant", label: "Assistant" },

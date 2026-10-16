@@ -2,6 +2,28 @@ FROM python:3.11-slim
 
 WORKDIR /app
 
+# Measured via `docker stats` while reproducing a local OOM kill: RSS
+# climbed steadily to ~1GB during RAG embedder/reranker warm-up, then spiked
+# past the container's limit in under 5s - too fast to be the models'
+# resident weights (~300-500MB total per api.py's own comment on
+# _WARM_MODELS_ON_STARTUP), and consistent with the classic CPU-inference
+# trap: torch/MKL/OpenMP see this host's full core count (os.cpu_count()
+# returned 8 on a container with under 2GB to work with) and each thread
+# allocates its own workspace buffers for the first forward pass, so
+# thread count - not model size - was setting the memory spike. Env vars,
+# not python code, because OMP/MKL read them once at first use; setting
+# LOKY_MAX_CPU_COUNT in api.py (os.environ.setdefault) already runs too
+# late, after several torch-importing modules have loaded. Applies to both
+# this local image and the Render deployment, which hit its own OOM
+# crash-loop from the same root cause (see WARM_MODELS_ON_STARTUP in
+# render.yaml - a mitigation for the symptom, this is the actual cause).
+ENV OMP_NUM_THREADS=2 \
+    MKL_NUM_THREADS=2 \
+    OPENBLAS_NUM_THREADS=2 \
+    NUMEXPR_NUM_THREADS=2 \
+    TOKENIZERS_PARALLELISM=false \
+    LOKY_MAX_CPU_COUNT=2
+
 # libgomp1: LightGBM's native library dlopen()s libgomp.so.1 (GNU OpenMP)
 # at import time; python:3.11-slim doesn't include it by default.
 RUN apt-get update \

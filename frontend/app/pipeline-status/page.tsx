@@ -47,7 +47,7 @@ export default function PipelineStatusPage() {
   return (
     <div className="space-y-6">
       <PageHeader
-        eyebrow="Retention Command Center"
+        eyebrow="Customer Intelligence"
         title="Pipeline status"
         description="Batch ingestion, feature drift, and where the next conditional retrain sits."
       />

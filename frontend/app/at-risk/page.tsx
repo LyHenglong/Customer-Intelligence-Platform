@@ -7,7 +7,9 @@ import type { AtRiskCustomer, AtRiskListResponse, OutreachDraftResponse } from "
 import ThresholdSlider from "@/components/ThresholdSlider";
 import PaginationControls from "@/components/PaginationControls";
 import ShapFactorList from "@/components/ShapFactorList";
+import RiskBadge from "@/components/RiskBadge";
 import PageHeader from "@/components/PageHeader";
+import Card from "@/components/Card";
 import LoadingState from "@/components/LoadingState";
 import ErrorState from "@/components/ErrorState";
 
@@ -70,7 +72,7 @@ export default function AtRiskPage() {
   return (
     <div className="space-y-5">
       <PageHeader
-        eyebrow="Retention Command Center"
+        eyebrow="Customer Intelligence"
         title="At-risk customers"
         description="Ranked by churn probability, with the factors driving each one and a next-best action."
         action={
@@ -93,11 +95,13 @@ export default function AtRiskPage() {
         <LoadingState label="Scoring the full customer population - this can take a moment on first load..." />
       ) : data ? (
         <>
-          <div className="overflow-x-auto rounded-xl border" style={{ borderColor: "var(--border)", background: "var(--surface-card)", boxShadow: "var(--shadow-card)" }}>
+          <Card bodyClassName="px-0">
+            <div className="overflow-x-auto">
             <table className="w-full text-sm">
               <thead>
-                <tr className="text-left" style={{ color: "var(--text-muted)", background: "var(--surface-card)" }}>
+                <tr className="text-left" style={{ color: "var(--text-muted)" }}>
                   <th className="px-3 py-2 font-medium">Customer</th>
+                  <th className="px-3 py-2 font-medium">Risk</th>
                   <th className="px-3 py-2 font-medium">Churn prob.</th>
                   <th className="px-3 py-2 font-medium">Contract</th>
                   <th className="px-3 py-2 font-medium">Tenure</th>
@@ -116,6 +120,9 @@ export default function AtRiskPage() {
                         <Link href={`/customers/${c.customer_id}`} className="font-medium underline" style={{ color: "var(--series-1)" }}>
                           {c.customer_id}
                         </Link>
+                      </td>
+                      <td className="px-3 py-2">
+                        <RiskBadge churnProbability={c.churn_probability} />
                       </td>
                       <td className="px-3 py-2">
                         <div className="flex items-center gap-2">
@@ -154,7 +161,8 @@ export default function AtRiskPage() {
                 })}
               </tbody>
             </table>
-          </div>
+            </div>
+          </Card>
           <PaginationControls offset={offset} limit={PAGE_SIZE} total={data.total_at_risk} onChange={setOffset} />
         </>
       ) : null}

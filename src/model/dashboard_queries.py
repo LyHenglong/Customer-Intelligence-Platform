@@ -296,6 +296,14 @@ def load_precomputed_scores(churn_version: str) -> pd.DataFrame | None:
 _USE_PRECOMPUTED_SCORES = os.environ.get("USE_PRECOMPUTED_SCORES", "false").lower() not in ("false", "0", "")
 
 
+def precomputed_scores_enabled() -> bool:
+    """Whether get_scored_customers can serve a cache miss from the cheap
+    public.churn_scores SELECT rather than a live scoring pass - lets a
+    caller (churn_tool.churn_analysis) decide it's safe to call
+    get_scored_customers directly on a miss, instead of only peeking."""
+    return _USE_PRECOMPUTED_SCORES
+
+
 def peek_scored_customers(churn_version: str) -> pd.DataFrame | None:
     """The cached frame if it is present and still valid, else None -
     never triggers a recompute.

@@ -6,7 +6,9 @@ import { getCustomer, postOutreachDraft, ApiError } from "@/lib/api-client";
 import type { CustomerLookupResult, OutreachDraftResponse } from "@/lib/types";
 import KpiCard from "@/components/KpiCard";
 import Card from "@/components/Card";
-import ShapFactorList from "@/components/ShapFactorList";
+import ShapImpactChart from "@/components/ShapImpactChart";
+import RiskBadge from "@/components/RiskBadge";
+import ChurnGauge from "@/components/ChurnGauge";
 import LoadingState from "@/components/LoadingState";
 import ErrorState from "@/components/ErrorState";
 
@@ -51,13 +53,19 @@ export default function CustomerDetailPage({ params }: { params: Promise<{ id: s
 
   return (
     <div className="space-y-6">
-      <div>
-        <Link href="/customers" className="text-[12.5px] font-medium" style={{ color: "var(--brand-strong)" }}>
-          ← Back to customers
-        </Link>
-        <h1 className="mt-1 text-[26px] font-bold leading-tight tracking-tight" style={{ color: "var(--text-primary)" }}>
-          {customer.customer_id}
-        </h1>
+      <div className="flex flex-wrap items-start justify-between gap-4">
+        <div>
+          <Link href="/customers" className="text-[12.5px] font-medium" style={{ color: "var(--brand-strong)" }}>
+            ← Back to customers
+          </Link>
+          <div className="mt-1 flex flex-wrap items-center gap-3">
+            <h1 className="text-[26px] font-bold leading-tight tracking-tight" style={{ color: "var(--text-primary)" }}>
+              {customer.customer_id}
+            </h1>
+            {customer.churn_probability !== null && <RiskBadge churnProbability={customer.churn_probability} />}
+          </div>
+        </div>
+        {customer.churn_probability !== null && <ChurnGauge probability={customer.churn_probability} />}
       </div>
 
       <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
@@ -73,8 +81,8 @@ export default function CustomerDetailPage({ params }: { params: Promise<{ id: s
       </div>
 
       {customer.shap_factors.length > 0 && (
-        <Card title="Risk factors">
-          <ShapFactorList factors={customer.shap_factors} />
+        <Card title="Why is this customer at risk?">
+          <ShapImpactChart factors={customer.shap_factors} />
         </Card>
       )}
 
@@ -91,7 +99,7 @@ export default function CustomerDetailPage({ params }: { params: Promise<{ id: s
       )}
 
       <Card
-        title="AI explanation & outreach draft"
+        title="Recommended action"
         action={
           !draft ? (
             <button
@@ -105,6 +113,12 @@ export default function CustomerDetailPage({ params }: { params: Promise<{ id: s
           ) : undefined
         }
       >
+        {!draft && (
+          <p className="text-sm" style={{ color: "var(--text-secondary)" }}>
+            Based on this customer&rsquo;s behavior and predicted churn risk, generate an AI explanation and a
+            personalized outreach draft.
+          </p>
+        )}
         {draft === "loading" && <p className="mt-2 text-sm" style={{ color: "var(--text-muted)" }}>Generating...</p>}
         {draft === "error" && <p className="mt-2 text-sm" style={{ color: "var(--status-critical)" }}>Failed to generate.</p>}
         {draft && typeof draft === "object" && (

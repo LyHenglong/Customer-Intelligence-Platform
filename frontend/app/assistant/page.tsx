@@ -34,7 +34,7 @@ export default function AssistantPage() {
   return (
     <div className="space-y-4">
       <PageHeader
-        eyebrow="Retention Command Center"
+        eyebrow="Customer Intelligence"
         title="AI Decision Assistant"
         description="Evidence-grounded answers over this platform's own data, models and documentation - not a general-purpose chatbot. Every number traces back to a tool result shown below the answer."
       />
