@@ -540,7 +540,7 @@ Everything below was actually run and checked during the build, not just written
   | --- | --- | --- | --- |
   | Model-selection experiment | 1,000,000 (5-fold CV) | 0.683 ± 0.002 | choosing between model families |
   | Hyperparameter sweep, winning config | 200,000 (4-fold CV) | 0.678 ± 0.003 | choosing hyperparameters |
-  | **Deployed artifact** (`20260923T040125Z`) | 150,000 | **0.666** | what actually serves predictions |
+  | **Deployed artifact** (`20260923T054451Z`) | 150,000 | **0.666** | what actually serves predictions |
 
   The deployed model trains on a 150,000-row sample because the retrain task runs in-process under Airflow's LocalExecutor on a 3.8GB Docker VM and was SIGKILLed at full scale (see Deviations); AUC was measured to be flat at 0.65–0.68 across sample sizes, so the cap costs little. Its full test-set metrics: precision 0.157, recall 0.600, F1 0.249, threshold 0.104. See "Limitations" and `report/findings.md` — this is still a modest model, and that's discussed honestly, not hidden.
 
